@@ -204,6 +204,11 @@ def create_zemax_file_list(which_system,
     'CRYO_PO4x4_IFU-AB_SPEC-HK.zmx',
     ...,]
 
+    Output: file_list, and settings_list
+
+    settings_list is a list of dictionaries containing the setting (scale, IFU, spectral band) of each file
+    we need that in the future to postprocess the results of each Zemax file
+
     :param which_system: which system do we want to analyze, can be 'ELT' or 'HARMONI' or 'IFS'
     :param AO_modes: a list of AO modes that can be ['NOAO', 'LTAO', 'SCAO', 'HCAO']
     :param scales: a list of Spaxel Scales that can be ['4x4', '10x10', '20x20', '60x30']
@@ -218,6 +223,7 @@ def create_zemax_file_list(which_system,
     if which_system == 'IFS':     # Only the IFS, starting at the CRYO
 
         file_list = []
+        settings_list = []          # List of settings dictionaries
         for scale in scales:
             name_scale = 'CRYO_PO' + scale
             for ifu in IFUs:
@@ -241,28 +247,44 @@ def create_zemax_file_list(which_system,
                     filename = name_scale + name_IFU + name_spec + '.zmx'
                     file_list.append(filename)
 
-        return file_list
+                    # Save settings:
+                    sett_dict = {'system': which_system, 'scale': scale, 'ifu': ifu, 'grating': spec}
+                    settings_list.append(sett_dict)
+
+        return file_list, settings_list
 
     if which_system == 'HARMONI':     # The same as 'IFS' but including the FPRS with the AO_modes
 
         file_list = []
+        settings_list = []
         # Create a list of file names from the CRYO onwards
-        ifs_file_list = create_zemax_file_list(which_system='IFS', scales=scales, IFUs=IFUs, grating=grating)
+        ifs_file_list, ifs_sett_list = create_zemax_file_list(which_system='IFS', scales=scales, IFUs=IFUs, grating=grating)
         # Add FPRS_ + AO mode as prefix
         for AO_mode in AO_modes:
             name_fprs = 'FPRS_' + AO_mode + '_'
-            for ifs_file in ifs_file_list:
+            for ifs_file, ifs_sett in zip(ifs_file_list, ifs_sett_list):
                 filename = name_fprs + ifs_file
                 file_list.append(filename)
-        return file_list
+
+                ifs_sett['AO_mode'] = AO_mode       # Add AO mode to the settings
+                ifs_sett['system'] = which_system   # Override the system mode to HARMONI, not IFS
+                settings_list.append(ifs_sett)
+
+        return file_list, settings_list
 
     if which_system == 'ELT':         # The same as 'HARMONI' but including the ELT
 
         # Create a list of file names from HARMONI
-        harmoni_files_list = create_zemax_file_list(which_system='HARMONI', AO_modes=AO_modes, scales=scales, IFUs=IFUs, grating=grating)
+        harmoni_files_list, harmoni_sett_list = create_zemax_file_list(which_system='HARMONI', AO_modes=AO_modes,
+                                                                       scales=scales, IFUs=IFUs, grating=grating)
         # Add ELT as prefix
         file_list = ['ELT_' + harmoni_file for harmoni_file in harmoni_files_list]
-        return file_list
+        settings_list = []
+        for harm_sett in harmoni_sett_list:
+            harm_sett['system'] = which_system      # Override the system mode to ELT, not HARMONI
+            settings_list.append(harm_sett)
+
+        return file_list, settings_list
 
     return
 
@@ -570,7 +592,7 @@ class AnalysisGeneric(object):
 
         return
 
-    def plot_and_save(self, analysis_name, list_results, file_name, results_dir, wavelength_idx, surface):
+    def plot_and_save(self, analysis_name, list_results, file_name, file_settings, results_dir, wavelength_idx):
 
 
         # First thing is to create a separate folder for this analysis
@@ -591,8 +613,27 @@ class AnalysisGeneric(object):
         else:
             wave_idx = wavelength_idx
 
-        surface_number = str(surface) if surface is not None else '_IMG'
-        # What about Surface Name?
+        # Read the settings
+        system, surface_number = file_settings['system'], file_settings['surface']
+        scale, ifu, grating = file_settings['scale'], file_settings['ifu'], file_settings['grating']
+        ao_mode = file_settings['AO_mode'] if 'AO_mode' in list(file_settings.keys()) else None
+        # Find out the NameCode for the surface
+        surface_codes = focal_planes[system][scale]
+        surface_name = list(surface_codes.keys())[list(surface_codes.values()).index(surface_number)]
+        # surface_number = str(surface) if surface is not None else '_IMG'
+
+        print("Metadata Review")
+        print("Filename: ", file_name)
+        print("System: ", system)
+        print("Scale: ", scale)
+        print("IFU: ", ifu)
+        print("Grating: ", grating)
+        print("AO mode: ", ao_mode)
+        print("Surface Code: ", surface_name)
+        print("Surface Number: ", surface_number)
+
+
+        ### --------------------------------- PLOTS and FIGURES --------------------------------------------------- ###
 
         # Statistics
         means, stds, mins, maxs = np.zeros(N_waves), np.zeros(N_waves), np.zeros(N_waves), np.zeros(N_waves)
@@ -604,7 +645,7 @@ class AnalysisGeneric(object):
             mins[i] = np.min(analysis_array[i])
             maxs[i] = np.max(analysis_array[i])
 
-            if i in [0, N_waves//2, N_waves -1]:    # Only show Min Central Max wavelengths
+            if i in [0, N_waves//2, N_waves - 1]:    # Only show Min | Central | Max wavelengths
 
                 # fig = plt.figure()
                 # plt.hist(analysis_array[i].flatten(), bins=10, histtype='step')
@@ -620,7 +661,8 @@ class AnalysisGeneric(object):
 
                 fig, ax = plt.subplots(1, 1)
                 sns.distplot(analysis_array[i].flatten(), ax=ax, axlabel=analysis_name)
-                fig_name = file_name + '_SURF' + surface_number + analysis_name + '_WAVE%d' % (wave_idx[i])
+                fig_name = file_name + '_' + analysis_name + '_SURF_' + surface_name + '_WAVE%d' % (wave_idx[i])
+                # fig_name = file_name + '_SURF' + surface_number + analysis_name + '_WAVE%d' % (wave_idx[i])
                 plt.title(fig_name)
                 if os.path.isfile(os.path.join(analysis_dir, fig_name)):
                     os.remove(os.path.join(analysis_dir, fig_name))
@@ -636,14 +678,12 @@ class AnalysisGeneric(object):
         plt.ylim(bottom=0)
         plt.xlabel(r'Wavelength [$\mu$m]')
         plt.ylabel(analysis_name)
-        fig_name = file_name + '_SURF' + surface_number + analysis_name
+        fig_name = file_name + '_' + analysis_name + '_SURF' + surface_name
         plt.title(fig_name)
         if os.path.isfile(os.path.join(analysis_dir, fig_name)):
             os.remove(os.path.join(analysis_dir, fig_name))
         fig.savefig(os.path.join(analysis_dir, fig_name))
         plt.close(fig)
-
-
 
         # (1) Object Field Coordinates [wavelengths, configs, N_fields, xy]
         # Independent of wavelength
@@ -670,7 +710,7 @@ class AnalysisGeneric(object):
             plt.scatter(focal_coord[i, :, :, 0], focal_coord[i, :, :, 1], s=3, color=colors[i])
         plt.xlabel(r'Focal X Coordinate [mm]')
         plt.ylabel(r'Focal Y Coordinate [mm]')
-        fig_name = file_name + '_XY_FOCAL_SURF' + surface_number
+        fig_name = file_name + '_XY_FOCAL_SURF' + surface_name
         plt.title(fig_name)
         if os.path.isfile(os.path.join(analysis_dir, fig_name)):
             os.remove(os.path.join(analysis_dir, fig_name))
@@ -695,7 +735,8 @@ class AnalysisGeneric(object):
         ax.set_ylabel(r'Object Y [mm]')
         ax.set_aspect('equal')
         plt.colorbar(tpc, ax=ax, orientation='horizontal')
-        fig_name = file_name + '_SURF' + surface_number + analysis_name + '_OBJ_WAVE%d' % (wave_idx[i_wave])
+        fig_name = file_name + '_' + analysis_name + '_SURF_' + surface_name + '_OBJ_WAVE%d' % (wave_idx[i_wave])
+        # fig_name = file_name + '_SURF' + surface_number + analysis_name + '_OBJ_WAVE%d' % (wave_idx[i_wave])
         ax.set_title(fig_name)
         if os.path.isfile(os.path.join(analysis_dir, fig_name)):
             os.remove(os.path.join(analysis_dir, fig_name))
@@ -706,7 +747,7 @@ class AnalysisGeneric(object):
 
         # (B) Focal Coordinates
 
-        if surface != None:     # Not a Detector Plane -> Focal has the same position for all wavelengths?
+        if surface_number != None:     # Not a Detector Plane -> Focal has the same position for all wavelengths?
 
             # We have to loop over wavelengths
             for i in [0, N_waves // 2, N_waves - 1]:
@@ -719,7 +760,8 @@ class AnalysisGeneric(object):
                 ax.set_ylabel(r'Focal Y [mm]')
                 ax.set_aspect('equal')
                 plt.colorbar(tpc, ax=ax, orientation='horizontal')
-                fig_name = file_name + '_SURF' + surface_number + analysis_name + '_FOC_WAVE%d' % (wave_idx[i])
+                fig_name = file_name + '_' + analysis_name + '_SURF_' + surface_name + '_FOC_WAVE%d' % (wave_idx[i])
+                # fig_name = file_name + '_SURF' + surface_number + analysis_name + '_FOC_WAVE%d' % (wave_idx[i])
                 ax.set_title(fig_name)
                 if os.path.isfile(os.path.join(analysis_dir, fig_name)):
                     os.remove(os.path.join(analysis_dir, fig_name))
@@ -728,7 +770,7 @@ class AnalysisGeneric(object):
                 # plt.pause(0.1)
                 plt.close()
 
-        elif surface == None:  # Detector Plane -> Focal will depend on wavelength
+        elif surface_number == None:  # Detector Plane -> Focal will depend on wavelength
 
             # (B) Focal Coordinates
             # All Wavelengths at once
@@ -741,7 +783,8 @@ class AnalysisGeneric(object):
             ax.set_ylabel(r'Focal Plane Y [mm]')
             ax.set_aspect('equal')
             plt.colorbar(tpc, ax=ax, orientation='horizontal')
-            fig_name = file_name + '_SURF' + surface_number + analysis_name + '_FOC'
+            fig_name = file_name + '_' + analysis_name + '_SURF_' + surface_name + '_FOC'
+            # fig_name = file_name + '_SURF' + surface_number + analysis_name + '_FOC'
             ax.set_title(fig_name)
             if os.path.isfile(os.path.join(analysis_dir, fig_name)):
                 os.remove(os.path.join(analysis_dir, fig_name))
@@ -1867,7 +1910,7 @@ class RMS_WFE_Analysis(AnalysisGeneric):
         # Loop over all Spaxels in the Slice
         for i, (h_x, h_y) in enumerate(zip(hx, hy)):
 
-            operand = constants.MeritOperandType_RWCE
+            operand = constants.MeritOperandType_RWRE
             rms = system.MFE.GetOperandValue(operand, surface, wave_idx, h_x, h_y, 0.0, 0.0, 0.0, 0.0)
             RMS_WFE[i] = wavelength * 1e3 * rms         # We assume the Wavelength comes in Microns
 
@@ -1894,7 +1937,8 @@ class RMS_WFE_Analysis(AnalysisGeneric):
     # and "plot_RMS_WFE_maps" to save the figures
 
     def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
-                        configuration_idx=None, surface=None, spaxels_per_slice=51):
+                        configuration_idx=None, surface=None, spaxels_per_slice=51,
+                        plots=True):
         """
         Function that loops over a given set of E2E model Zemax files, running the analysis
         defined by self.analysis_function_rms_wfe
@@ -1916,10 +1960,12 @@ class RMS_WFE_Analysis(AnalysisGeneric):
         results_shapes = [(spaxels_per_slice,), (spaxels_per_slice, 2), (spaxels_per_slice, 2)]
 
         # read the file options
-        file_list = create_zemax_file_list(which_system=files_opt['which_system'], AO_modes=files_opt['AO_modes'],
-                                           scales=files_opt['scales'], IFUs=files_opt['IFUs'], grating=files_opt['grating'])
+        file_list, sett_list = create_zemax_file_list(which_system=files_opt['which_system'],
+                                                      AO_modes=files_opt['AO_modes'], scales=files_opt['scales'],
+                                                      IFUs=files_opt['IFUs'], grating=files_opt['grating'])
 
-        for zemax_file in file_list:
+        # Loop over the Zemax files
+        for zemax_file, settings in zip(file_list, sett_list):
 
             list_results = self.run_analysis(analysis_function=self.analysis_function_rms_wfe,
                                              files_dir=files_dir, zemax_file=zemax_file, results_path=results_path,
@@ -1932,10 +1978,11 @@ class RMS_WFE_Analysis(AnalysisGeneric):
             # Post-Processing the results
             file_name = zemax_file.split('.')[0]
             results_dir = os.path.join(results_path, file_name)
-            surface_number = str(surface) if surface is not None else '_IMG'
+            settings['surface'] = surface
 
-            self.plot_and_save(analysis_name='RMS_WFE', list_results=list_results, file_name=file_name,
-                               results_dir=results_dir, wavelength_idx=wavelength_idx, surface=surface)
+            if plots is True:
+                self.plot_and_save(analysis_name='RMS_WFE', list_results=list_results, file_name=file_name,
+                                   file_settings=settings, results_dir=results_dir, wavelength_idx=wavelength_idx)
 
 
             # N_waves = rms_wfe.shape[0]
