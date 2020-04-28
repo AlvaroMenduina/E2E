@@ -30,9 +30,9 @@ focal_planes = {}
 focal_planes['IFS'] = {'4x4': {'FPRS': 6, 'PO': 41},
                        '10x10': {'FPRS': 6, 'PO': 38},
                        '20x20': {'FPRS': 6, 'PO': 38},
-                       '60x30': {'FPRS': 6, 'PO': 30, 'FS': 58, 'SM': 61, 'SL': 77, 'DET': None}}
+                       '60x30': {'FPRS': 6, 'PO': 30, 'BS': 58, 'SM': 61, 'SL': 77, 'DET': None}}
 # Keywords for Focal Plane are:
-# PO: PreOptics, FS: Field Splitter, SM: Slicer Mirror, SL: Slit, DET: Detector
+# PO: PreOptics, BS: Before Slicer, SM: Slicer Mirror, SL: Slit, DET: Detector
 
 # 61 Slicer Mirror
 # 77 Slit
@@ -593,9 +593,23 @@ class AnalysisGeneric(object):
         return
 
     def plot_and_save(self, analysis_name, list_results, file_name, file_settings, results_dir, wavelength_idx):
+        """
+        Semi-"generic" plot and save routine to post-process the analysis results
+        It works for analysis types such as RMS Wavefront Error where you have a list of arrays like
+        [MAIN_RESULTS, OBJ_XY, FOC_XY, WAVELENGTHS]
+        and MAIN_RESULTS is something like the RMS WFE, of shape [N_waves, N_configs, N_fields]
+        i.e. a given value for each Field Point, at each Configuration (slice) and Wavelength
 
+        :param analysis_name: string, to add the analysis name to the plots
+        :param list_results: list containing the arrays [MAIN_RESULTS, OBJ_XY, FOC_XY, WAVELENGTHS]
+        :param file_name: string, name of the Zemax file
+        :param file_settings: dictionary of settings, so we can access things like the spaxel scale, the IFU section...
+        :param results_dir: path to where the results will be saved
+        :param wavelength_idx: list of wavelength numbers used, or None for All Wavelengths
+        :return:
+        """
 
-        # First thing is to create a separate folder for this analysis
+        # First thing is to create a separate folder within the results directory for this analysis
         analysis_dir = os.path.join(results_dir, analysis_name)
         print("Analysis Results will be saved in folder: ", analysis_dir)
         if not os.path.exists(analysis_dir):
@@ -631,6 +645,41 @@ class AnalysisGeneric(object):
         print("AO mode: ", ao_mode)
         print("Surface Code: ", surface_name)
         print("Surface Number: ", surface_number)
+
+        ### ---------------------------------- Write Results File -------------------------------------------------- ###
+        name_code = file_name + '_' + analysis_name + '_SURF_' + surface_name
+
+        # Save Metadata of the Analysis
+        output_name = os.path.join(analysis_dir, name_code + "_METADATA.txt")
+        metadata_file = open(output_name, "w")
+        metadata_file.write("Analysis: %s \n" % analysis_name)
+        metadata_file.write("Zemax File: %s \n" % file_name)
+        metadata_file.write("At Surface: #%d, %s \n" % (surface_number, surface_name))
+        metadata_file.write("System Mode: %s \n" % system)
+        metadata_file.write("Spaxel Scale: %s \n" % scale)
+        metadata_file.write("IFU section: %s \n" % ifu)
+        metadata_file.write("AO mode: %s \n" % ao_mode)
+        metadata_file.write("Wavelength Numbers: [")
+        for idx in wave_idx:
+            metadata_file.write(" %d " % idx)
+        metadata_file.write(" ] \n")
+        metadata_file.write("Wavelengths [microns] : [")
+        for wave in wavelengths:
+            metadata_file.write(" %.4f " % wave)
+        metadata_file.write(" ] \n")
+
+        # Save the arrays
+        np.save(os.path.join(analysis_dir, name_code), analysis_array)
+        np.save(os.path.join(analysis_dir, name_code + '_OBJECT_COORD'), object_coord)
+        np.save(os.path.join(analysis_dir, name_code + '_FOCAL_COORD'), focal_coord)
+        np.save(os.path.join(analysis_dir, name_code + '_WAVELENGTHS'), wavelengths)
+
+        # L = ["This is Delhi \n", "This is Paris \n", "This is London \n"]
+        #
+        # # \n is placed to indicate EOL (End of Line)
+        # metadata_file.write("Hello \n")
+        # metadata_file.writelines(L)
+        metadata_file.close()
 
 
         ### --------------------------------- PLOTS and FIGURES --------------------------------------------------- ###
@@ -1910,7 +1959,7 @@ class RMS_WFE_Analysis(AnalysisGeneric):
         # Loop over all Spaxels in the Slice
         for i, (h_x, h_y) in enumerate(zip(hx, hy)):
 
-            operand = constants.MeritOperandType_RWRE
+            operand = constants.MeritOperandType_RWCE
             rms = system.MFE.GetOperandValue(operand, surface, wave_idx, h_x, h_y, 0.0, 0.0, 0.0, 0.0)
             RMS_WFE[i] = wavelength * 1e3 * rms         # We assume the Wavelength comes in Microns
 
