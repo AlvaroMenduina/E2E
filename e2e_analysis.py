@@ -497,6 +497,18 @@ class AnalysisGeneric(object):
                 _surf = system.LDE.GetSurfaceAt(surf_number)
                 _surf.TypeData.IgnoreSurface = True
 
+            last_surface = system.LDE.GetSurfaceAt(surface)
+            thickness = last_surface.Thickness
+            print("Thickness: ", last_surface.Thickness)
+            # image = system.LDE.GetSurfaceAt(N_surfaces - 1)
+            # print("\nImage Name: ", image.Comment)
+
+            # Temporarily set the Thickness to 0
+            last_surface.Thickness = 0.0
+            print("Thickness: ", last_surface.Thickness)
+
+
+
         # Double check we are using the right surface
         print("\nSurface Name: ", system.LDE.GetSurfaceAt(surface).Comment)
 
@@ -537,6 +549,8 @@ class AnalysisGeneric(object):
 
         # Unignore the surfaces
         if surface != (N_surfaces - 1):
+            last_surface = system.LDE.GetSurfaceAt(surface)
+            last_surface.Thickness = thickness
             for surf_number in surfaces_to_ignore:
                 _surf = system.LDE.GetSurfaceAt(surf_number)
                 _surf.TypeData.IgnoreSurface = False
