@@ -668,7 +668,7 @@ class AnalysisGeneric(object):
         metadata_file = open(output_name, "w")
         metadata_file.write("Analysis: %s \n" % analysis_name)
         metadata_file.write("Zemax File: %s \n" % file_name)
-        metadata_file.write("At Surface: #%d, %s \n" % (surface_number, surface_name))
+        metadata_file.write("At Surface: #%s, %s \n" % (str(surface_number), surface_name))
         metadata_file.write("System Mode: %s \n" % system)
         metadata_file.write("Spaxel Scale: %s \n" % scale)
         metadata_file.write("IFU section: %s \n" % ifu)
@@ -835,13 +835,19 @@ class AnalysisGeneric(object):
 
         elif surface_number == None:  # Detector Plane -> Focal will depend on wavelength
 
+            # Average across spaxel scales?
+            x, y = focal_coord[:, :, :, 0], focal_coord[:, :, :, 1]
+            x, y = np.mean(x, axis=2).flatten(), np.mean(y, axis=2).flatten()
+            analysis_array = np.mean(analysis_array, axis=2)
+
+
             # (B) Focal Coordinates
             # All Wavelengths at once
-            x, y = focal_coord[:, :, :, 0].flatten(), focal_coord[:, :, :, 1].flatten()
+            # x, y = focal_coord[:, :, :, 0].flatten(), focal_coord[:, :, :, 1].flatten()
             triang = tri.Triangulation(x, y)
             fig, ax = plt.subplots(1, 1)
             tpc = ax.tripcolor(triang, analysis_array.flatten(), shading='flat', cmap='jet')
-            ax.scatter(x, y, s=2, color='black')
+            # ax.scatter(x, y, s=2, color='black')
             ax.set_xlabel(r'Focal Plane X [mm]')
             ax.set_ylabel(r'Focal Plane Y [mm]')
             ax.set_aspect('equal')
