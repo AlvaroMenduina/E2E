@@ -977,7 +977,7 @@ class SpotDiagramAnalysis(AnalysisGeneric):
         results_shapes = [(N_fields, N_rays**2, 2)]             # [N_fields, N_rays^2, (x,y)]
 
         # read the file options
-        file_list = create_zemax_file_list(which_system=files_opt['which_system'], AO_modes=files_opt['AO_modes'],
+        file_list, settings = create_zemax_file_list(which_system=files_opt['which_system'], AO_modes=files_opt['AO_modes'],
                                            scales=files_opt['scales'], IFUs=files_opt['IFUs'], grating=files_opt['grating'])
 
         for zemax_file in file_list:
@@ -1151,7 +1151,7 @@ class RMSSpotAnalysis(AnalysisGeneric):
         results_shapes = [(N_fields,)]
 
         # read the file options
-        file_list = create_zemax_file_list(which_system=files_opt['which_system'], AO_modes=files_opt['AO_modes'],
+        file_list, settings = create_zemax_file_list(which_system=files_opt['which_system'], AO_modes=files_opt['AO_modes'],
                                            scales=files_opt['scales'], IFUs=files_opt['IFUs'], grating=files_opt['grating'])
 
         list_spot = []
@@ -1371,7 +1371,7 @@ class EnsquaredEnergyCustomAnalysis(AnalysisGeneric):
         results_shapes = [(5,), (5, 2), (5, 2)]
 
         # read the file options
-        file_list = create_zemax_file_list(which_system=files_opt['which_system'], AO_modes=files_opt['AO_modes'],
+        file_list, settings = create_zemax_file_list(which_system=files_opt['which_system'], AO_modes=files_opt['AO_modes'],
                                            scales=files_opt['scales'], IFUs=files_opt['IFUs'], grating=files_opt['grating'])
 
         for zemax_file in file_list:
@@ -1587,7 +1587,7 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
         results_shapes = [(5,), (5, 2), (5, 2)]
 
         # read the file options
-        file_list = create_zemax_file_list(which_system=files_opt['which_system'], AO_modes=files_opt['AO_modes'],
+        file_list, settings = create_zemax_file_list(which_system=files_opt['which_system'], AO_modes=files_opt['AO_modes'],
                                            scales=files_opt['scales'], IFUs=files_opt['IFUs'], grating=files_opt['grating'])
 
         for zemax_file in file_list:
@@ -1637,6 +1637,151 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
                 plt.close()
 
         return list_results
+
+
+class SpotDiagramDetector(AnalysisGeneric):
+
+    def analysis_functions_spots(self, system, wave_idx, config, surface, N_rays, reference='ChiefRay'):
+
+        # colors = cm.Reds(np.linspace(0.5, 1, 23))
+        # color = colors[wave_idx - 1]
+
+
+        # Set Current Configuration
+        system.MCE.SetCurrentConfiguration(config)
+
+        # Get the Field Points for that configuration
+        sysField = system.SystemData.Fields
+
+        N_fields = sysField.NumberOfFields
+        # check that the field is normalized correctly
+        if sysField.Normalization != constants.FieldNormalizationType_Radial:
+            sysField.Normalization = constants.FieldNormalizationType_Radial
+
+        # Loop over the fields to get the Normalization Radius
+        r_max = np.max([np.sqrt(sysField.GetField(i).X ** 2 +
+                                sysField.GetField(i).Y ** 2) for i in np.arange(1, N_fields + 1)])
+
+        # Pupil Rays
+        px = np.linspace(-1, 1, N_rays, endpoint=True)
+        pxx, pyy = np.meshgrid(px, px)
+        pupil_mask = np.sqrt(pxx**2 + pyy**2) <= 1.0
+        px, py = pxx[pupil_mask], pyy[pupil_mask]
+        # How many rays are actually inside the pupil aperture?
+        N_rays_inside = px.shape[0]
+
+        XY = np.empty((1, N_rays_inside + 1, 2))     # Rays inside plus 1 for the chief ray extra
+
+        obj_xy = np.zeros((1, 2))        # (fx, fy) coordinates
+        foc_xy = np.empty((1, 2))        # raytrace results of the Centroid
+
+        if config == 1:
+            print("\nTracing %d rays to calculate FWHM PSF" % (N_rays_inside))
+
+        # fig, axes = plt.subplots(1, N_fields)
+
+        # Loop over each Field computing the Spot Diagram
+
+
+        fx, fy = sysField.GetField(2).X, sysField.GetField(2).Y
+        hx, hy = fx / r_max, fy / r_max      # Normalized field coordinates (hx, hy)
+
+        j = 0
+        obj_xy[j, :] = [fx, fy]
+
+        raytrace = system.Tools.OpenBatchRayTrace()
+        # remember to specify the surface to which you are tracing!
+        normUnPolData = raytrace.CreateNormUnpol(N_rays_inside + 1, constants.RaysType_Real, surface)
+
+        # Add the Chief Ray
+        normUnPolData.AddRay(wave_idx, hx, hy, 0.0, 0.0, constants.OPDMode_None)
+
+        for (p_x, p_y) in zip(px, py):
+            # Add the ray to the RayTrace
+            normUnPolData.AddRay(wave_idx, hx, hy, p_x, p_y, constants.OPDMode_None)
+
+        # Run the RayTrace for the whole Slice
+        CastTo(raytrace, 'ISystemTool').RunAndWaitForCompletion()
+        normUnPolData.StartReadingResults()
+        for i in range(N_rays_inside + 1):
+            output = normUnPolData.ReadNextResult()
+            if output[2] == 0 and output[3] == 0:
+                XY[j, i, 0] = output[4]
+                XY[j, i, 1] = output[5]
+
+        normUnPolData.ClearData()
+        CastTo(raytrace, 'ISystemTool').Close()
+
+        x, y = XY[j, :, 0], XY[j, :, 1]
+        chief_x, chief_y = x[0], y[0]           # We added the Chief Ray first to the BatchTrace
+        cent_x, cent_y = np.mean(x), np.mean(y)
+
+        # Select what point will be used as Reference for the FWHM
+        if reference == "Centroid":
+            ref_x, ref_y = cent_x, cent_y
+        elif reference == "ChiefRay":
+            ref_x, ref_y = chief_x, chief_y
+        else:
+            raise ValueError("reference should be 'ChiefRay' or 'Centroid'")
+
+        # Add the Reference Point to the Focal Plane Raytrace results
+        foc_xy[j, :] = [ref_x, ref_y]
+
+        # # Calculate the contours
+        # x, y = XY[j, :, 0], XY[j, :, 1]
+        #
+        # mx, my = np.mean(x), np.mean(y)
+        # dx, dy = 1000*(x - mx), 1000*(y - my)       # in microns
+        # ax = axes[j]
+        # ax.scatter(dx, dy, s=3, color=color)
+        # # ax.set_xlabel(r'X [mm]')
+        # # ax.set_ylabel(r'X [mm]')
+        # ax.set_xlim([-25, 25])
+        # ax.set_ylim([-25, 25])
+        # ax.set_xticklabels([])
+        # ax.set_yticklabels([])
+        # ax.set_aspect('equal')
+        # ax.xaxis.set_visible('False')
+        # ax.yaxis.set_visible('False')
+
+        return [XY, obj_xy, foc_xy]
+
+    def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
+                        configuration_idx=None, surface=None, N_rays=40, reference='ChiefRay'):
+        """
+
+        """
+
+        # We need to know how many rays are inside the pupil
+        px = np.linspace(-1, 1, N_rays, endpoint=True)
+        pxx, pyy = np.meshgrid(px, px)
+        pupil_mask = np.sqrt(pxx ** 2 + pyy ** 2) <= 1.0
+        px, py = pxx[pupil_mask], pyy[pupil_mask]
+        # How many rays are actually inside the pupil aperture?
+        N_rays_inside = px.shape[0]
+
+        # We want the result to produce as output: the RMS WFE array, and the RayTrace at both Object and Focal plane
+        results_names = ['XY', 'OBJ_XY', 'FOC_XY']
+        # we need to give the shapes of each array to self.run_analysis
+        results_shapes = [(1, N_rays_inside + 1, 2), (1, 2), (1, 2)]
+
+        # read the file options
+        file_list, settings = create_zemax_file_list(which_system=files_opt['which_system'], AO_modes=files_opt['AO_modes'],
+                                           scales=files_opt['scales'], IFUs=files_opt['IFUs'], grating=files_opt['grating'])
+
+        for zemax_file in file_list:
+
+            list_results = self.run_analysis(analysis_function=self.analysis_functions_spots,
+                                             files_dir=files_dir,zemax_file=zemax_file, results_path=results_path,
+                                             results_shapes=results_shapes, results_names=results_names,
+                                             wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
+                                             surface=surface, N_rays=N_rays, reference=reference)
+
+            return list_results
+
+
+
+
 
 class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
     """
@@ -1822,11 +1967,11 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
 
             plt.close(joint.fig)
 
-        # plt.show()
+        plt.show()
         #
         # plt.show(block=False)
         # plt.pause(0.05)
-        plt.close(fig)
+        # plt.close(fig)
 
         # Remember to remove the extra fields otherwise they pile up
         sysField.RemoveField(N_fields)
@@ -1847,7 +1992,7 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
         results_shapes = [(5, 3), (5, 2), (5, 2)]
 
         # read the file options
-        file_list = create_zemax_file_list(which_system=files_opt['which_system'], AO_modes=files_opt['AO_modes'],
+        file_list, settings = create_zemax_file_list(which_system=files_opt['which_system'], AO_modes=files_opt['AO_modes'],
                                            scales=files_opt['scales'], IFUs=files_opt['IFUs'], grating=files_opt['grating'])
 
         for zemax_file in file_list:
