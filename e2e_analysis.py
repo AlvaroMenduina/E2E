@@ -30,9 +30,9 @@ focal_planes = {}
 focal_planes['IFS'] = {'4x4': {'FPRS': 6, 'PO': 41},
                        '10x10': {'FPRS': 6, 'PO': 38},
                        '20x20': {'FPRS': 6, 'PO': 38},
-                       '60x30': {'FPRS': 6, 'PO': 30, 'BS': 58, 'SM': 61, 'SL': 77, 'DET': None}}
+                       '60x30': {'FPRS': 6, 'PO': 30, 'IS': 59, 'SL': 77, 'DET': None}}
 # Keywords for Focal Plane are:
-# PO: PreOptics, BS: Before Slicer, SM: Slicer Mirror, SL: Slit, DET: Detector
+# PO: PreOptics, IS: Image Mirror, SL: Slit, DET: Detector
 
 # 61 Slicer Mirror
 # 77 Slit
@@ -506,8 +506,6 @@ class AnalysisGeneric(object):
             # Temporarily set the Thickness to 0
             last_surface.Thickness = 0.0
             print("Thickness: ", last_surface.Thickness)
-
-
 
         # Double check we are using the right surface
         print("\nSurface Name: ", system.LDE.GetSurfaceAt(surface).Comment)
@@ -2117,6 +2115,8 @@ class RMS_WFE_Analysis(AnalysisGeneric):
         obj_xy = r_max * np.array([hx, hy]).T
         RMS_WFE = np.empty(spaxels_per_slice)
         foc_xy = np.empty((spaxels_per_slice, 2))
+        global_xy = np.empty((spaxels_per_slice, 2))
+        local_xyz = np.empty((spaxels_per_slice, 3))
 
         raytrace = system.Tools.OpenBatchRayTrace()
         normUnPolData = raytrace.CreateNormUnpol(spaxels_per_slice, constants.RaysType_Real, surface)
@@ -2137,13 +2137,38 @@ class RMS_WFE_Analysis(AnalysisGeneric):
         for i in range(spaxels_per_slice):
             output = normUnPolData.ReadNextResult()
             if output[2] == 0 and output[3] == 0:
+                local_xyz[i, 0] = output[4]
+                local_xyz[i, 1] = output[5]
+                local_xyz[i, 2] = output[6]
+
+                # Local Focal X Y
                 foc_xy[i, 0] = output[4]
                 foc_xy[i, 1] = output[5]
 
         normUnPolData.ClearData()
         CastTo(raytrace, 'ISystemTool').Close()
 
-        return [RMS_WFE, obj_xy, foc_xy]
+        # Get the transformation from Local to Global Coordinates
+        global_mat = system.LDE.GetGlobalMatrix(surface)
+        R11, R12, R13, R21, R22, R23, R31, R32, R33, X0, Y0, Z0 = global_mat[1:]
+        global_matrix = np.array([[R11, R12, R13],
+                                  [R21, R22, R23],
+                                  [R31, R32, R33]])
+        offset = np.array([X0, Y0, Z0])
+
+        global_xyz = np.dot(local_xyz, global_matrix) + offset
+        _global = np.dot(global_matrix, local_xyz.T) + offset
+        print(_global.shape)
+        # eps = np.linalg.norm(global_xyz - _global)
+        # print('Diff %.4e' % eps)
+        # print('XYZ', global_xyz.shape)
+        # print('-')
+        global_xy = global_xyz[:, :2]
+        # print(global_xy.shape)
+
+        # Transform local to Global
+
+        return [RMS_WFE, obj_xy, foc_xy, global_xy]
 
     # The following functions depend on how you want to post-process your analysis results
     # For example, "loop_over_files" automatically runs the RMS WFE analysis across all Zemax files
@@ -2169,9 +2194,9 @@ class RMS_WFE_Analysis(AnalysisGeneric):
         """
 
         # We want the result to produce as output: the RMS WFE array, and the RayTrace at both Object and Focal plane
-        results_names = ['RMS_WFE', 'OBJ_XY', 'FOC_XY']
+        results_names = ['RMS_WFE', 'OBJ_XY', 'FOC_XY', 'GLOB_XY']
         # we need to give the shapes of each array to self.run_analysis
-        results_shapes = [(spaxels_per_slice,), (spaxels_per_slice, 2), (spaxels_per_slice, 2)]
+        results_shapes = [(spaxels_per_slice,), (spaxels_per_slice, 2), (spaxels_per_slice, 2), (spaxels_per_slice, 2)]
 
         # read the file options
         file_list, sett_list = create_zemax_file_list(which_system=files_opt['which_system'],
@@ -2187,7 +2212,7 @@ class RMS_WFE_Analysis(AnalysisGeneric):
                                              wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
                                              surface=surface, spaxels_per_slice=spaxels_per_slice)
 
-            rms_wfe, obj_xy, foc_xy, wavelengths = list_results
+            rms_wfe, obj_xy, foc_xy, global_xy, wavelengths = list_results
 
             # Post-Processing the results
             file_name = zemax_file.split('.')[0]
@@ -2278,7 +2303,7 @@ class RMS_WFE_Analysis(AnalysisGeneric):
             #     plt.pause(0.5)
             #     plt.close()
 
-        return rms_wfe, obj_xy, foc_xy, wavelengths
+        return rms_wfe, obj_xy, foc_xy, global_xy, wavelengths
 
 
     def flip_rms(self, rms_datacube):
