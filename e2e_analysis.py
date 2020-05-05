@@ -2048,6 +2048,128 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
 
         return list_results
 
+class RaytraceAnalysis(AnalysisGeneric):
+    """
+    Raytrace analysis at any surface
+    """
+
+    @staticmethod
+    def analysis_function_raytrace(system, wave_idx, config, rays_per_slice, surface):
+
+        # Set Current Configuration
+        system.MCE.SetCurrentConfiguration(config)
+
+        # Get the Field Points for that configuration
+        sysField = system.SystemData.Fields
+        # check that the field is normalized correctly
+        if sysField.Normalization != constants.FieldNormalizationType_Radial:
+            sysField.Normalization = constants.FieldNormalizationType_Radial
+        N_fields = sysField.NumberOfFields
+
+        # Loop over the fields to get the Normalization Radius
+        r_max = np.max([np.sqrt(sysField.GetField(i).X ** 2 +
+                                sysField.GetField(i).Y ** 2) for i in np.arange(1, N_fields + 1)])
+        # TODO: make this robust
+        # Watch Out! This assumes that Field #1 is at the edge of the slice and that Field #3 is at the other edge
+        fx_min, fy_min = sysField.GetField(1).X, sysField.GetField(1).Y
+        fx_max, fy_max = sysField.GetField(3).X, sysField.GetField(3).Y
+
+        # Normalized field coordinates (hx, hy)
+        hx_min, hx_max = fx_min / r_max, fx_max / r_max
+        hy_min, hy_max = fy_min / r_max, fy_max / r_max
+
+        hx = np.linspace(hx_min, hx_max, rays_per_slice)
+        hy = np.linspace(hy_min, hy_max, rays_per_slice)
+
+        # The Field coordinates for the Object
+        obj_xy = r_max * np.array([hx, hy]).T
+        foc_xy = np.empty((rays_per_slice, 2))
+        global_xy = np.empty((rays_per_slice, 2))
+        local_xyz = np.empty((rays_per_slice, 3))
+
+        raytrace = system.Tools.OpenBatchRayTrace()
+        normUnPolData = raytrace.CreateNormUnpol(rays_per_slice, constants.RaysType_Real, surface)
+
+        # Loop over all Rays in the Slice
+        for i, (h_x, h_y) in enumerate(zip(hx, hy)):
+            # Add the ray to the RayTrace
+            normUnPolData.AddRay(wave_idx, h_x, h_y, 0, 0, constants.OPDMode_None)
+
+        # Run the RayTrace for the whole Slice
+        CastTo(raytrace, 'ISystemTool').RunAndWaitForCompletion()
+        normUnPolData.StartReadingResults()
+        for i in range(rays_per_slice):
+            output = normUnPolData.ReadNextResult()
+            if output[2] == 0 and output[3] == 0:
+                local_xyz[i, 0] = output[4]
+                local_xyz[i, 1] = output[5]
+                local_xyz[i, 2] = output[6]
+
+                # Local Focal X Y
+                foc_xy[i, 0] = output[4]
+                foc_xy[i, 1] = output[5]
+
+        normUnPolData.ClearData()
+        CastTo(raytrace, 'ISystemTool').Close()
+
+        # Get the transformation from Local to Global Coordinates
+        global_mat = system.LDE.GetGlobalMatrix(surface)
+        R11, R12, R13, R21, R22, R23, R31, R32, R33, X0, Y0, Z0 = global_mat[1:]
+        global_matrix = np.array([[R11, R12, R13],
+                                  [R21, R22, R23],
+                                  [R31, R32, R33]])
+        offset = np.array([X0, Y0, Z0])
+
+        # Transform from Local to Global and only save X and Y
+        global_xyz = (np.dot(global_matrix, local_xyz.T)).T + offset
+        global_xy = global_xyz[:, :2]
+
+        return [obj_xy, foc_xy, global_xy]
+
+    def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
+                        configuration_idx=None, surface=None, rays_per_slice=3,
+                        plots=True):
+        """
+        Function that loops over a given set of E2E model Zemax files, running the analysis
+        defined by self.analysis_function_raytrace
+
+
+        :param files_dir: path where the E2E model files are stored
+        :param files_opt: dictionary containing the info to create the list of zemax files we want to analyse
+        :param results_path: path where we want to store the results
+        :param wavelength_idx: list containing the Wavelength numbers we want to analyze. If None, we will use All
+        :param configuration_idx: list containing the Configurations we want to analyze. If None, we will use All
+        :param surface: Zemax Surface number at which the analysis will be computed
+        :param rays_per_slice: number rays to trace per slice
+        :return:
+        """
+
+        results_names = ['OBJ_XY', 'FOC_XY', 'GLOB_XY']
+        # we need to give the shapes of each array to self.run_analysis
+        results_shapes = [(rays_per_slice, 2), (rays_per_slice, 2), (rays_per_slice, 2)]
+
+        # read the file options
+        file_list, sett_list = create_zemax_file_list(which_system=files_opt['which_system'],
+                                                      AO_modes=files_opt['AO_modes'], scales=files_opt['scales'],
+                                                      IFUs=files_opt['IFUs'], grating=files_opt['grating'])
+
+        # Loop over the Zemax files
+        results = []
+        for zemax_file, settings in zip(file_list, sett_list):
+
+            list_results = self.run_analysis(analysis_function=self.analysis_function_raytrace,
+                                             files_dir=files_dir, zemax_file=zemax_file, results_path=results_path,
+                                             results_shapes=results_shapes, results_names=results_names,
+                                             wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
+                                             surface=surface, rays_per_slice=rays_per_slice)
+
+            obj_xy, foc_xy, global_xy, wavelengths = list_results
+
+            # For each file we save the list of results
+            # we could use that in a Monte Carlo analysis for example
+            results.append(list_results)
+
+        return results
 
 
 class RMS_WFE_Analysis(AnalysisGeneric):
@@ -2156,17 +2278,9 @@ class RMS_WFE_Analysis(AnalysisGeneric):
                                   [R31, R32, R33]])
         offset = np.array([X0, Y0, Z0])
 
-        global_xyz = np.dot(local_xyz, global_matrix) + offset
-        _global = np.dot(global_matrix, local_xyz.T) + offset
-        print(_global.shape)
-        # eps = np.linalg.norm(global_xyz - _global)
-        # print('Diff %.4e' % eps)
-        # print('XYZ', global_xyz.shape)
-        # print('-')
+        # Transform from Local to Global and only save X and Y
+        global_xyz = (np.dot(global_matrix, local_xyz.T)).T + offset
         global_xy = global_xyz[:, :2]
-        # print(global_xy.shape)
-
-        # Transform local to Global
 
         return [RMS_WFE, obj_xy, foc_xy, global_xy]
 
@@ -2204,6 +2318,7 @@ class RMS_WFE_Analysis(AnalysisGeneric):
                                                       IFUs=files_opt['IFUs'], grating=files_opt['grating'])
 
         # Loop over the Zemax files
+        results = []
         for zemax_file, settings in zip(file_list, sett_list):
 
             list_results = self.run_analysis(analysis_function=self.analysis_function_rms_wfe,
@@ -2212,6 +2327,7 @@ class RMS_WFE_Analysis(AnalysisGeneric):
                                              wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
                                              surface=surface, spaxels_per_slice=spaxels_per_slice)
 
+            results.append(list_results)
             rms_wfe, obj_xy, foc_xy, global_xy, wavelengths = list_results
 
             # Post-Processing the results
@@ -2224,86 +2340,7 @@ class RMS_WFE_Analysis(AnalysisGeneric):
                                    file_settings=settings, results_dir=results_dir, wavelength_idx=wavelength_idx)
 
 
-            # N_waves = rms_wfe.shape[0]
-            #
-            # if wavelength_idx is None:
-            #     wave_idx = np.arange(1, N_waves + 1)
-            # else:
-            #     wave_idx = wavelength_idx
-            #
-            # # Post-Processing the results
-            # file_name = zemax_file.split('.')[0]
-            # results_dir = os.path.join(results_path, file_name)
-            # surface_number = str(surface) if surface is not None else '_IMG'
-            #
-            #
-            # # rms_ifu = self.flip_rms(rms_wfe)
-            # # self.plot_RMS_WFE_maps(file_name, results_path, rms_ifu, wavelengths)
-            #
-            # # RayTrace to the Focal Plane
-            #
-            # colors = cm.Reds(np.linspace(0.5, 1, N_waves))
-            # plt.figure()
-            # for i in range(N_waves):
-            #     plt.scatter(foc_xy[i, :, :, 0], foc_xy[i, :, :, 1], s=3, color=colors[i])
-            # plt.xlabel(r'Focal X Coordinate [mm]')
-            # plt.ylabel(r'Focal Y Coordinate [mm]')
-            # fig_name = file_name + '_XY_FOCAL_SURF' + surface_number
-            # plt.title(fig_name)
-            # if os.path.isfile(os.path.join(results_dir, fig_name)):
-            #     os.remove(os.path.join(results_dir, fig_name))
-            # plt.savefig(os.path.join(results_dir, fig_name))
-            # plt.show(block=False)
-            # plt.pause(0.5)
-            # plt.close()
-            #
-            # # Object Field Coordinates [wavelengths, configs, spaxels_per_slice, xy]
-            # plt.figure()
-            # plt.scatter(obj_xy[0, :, :, 0], obj_xy[0, :, :, 1], s=3)
-            # plt.xlabel(r'Object X Coordinate')
-            # plt.ylabel(r'Object Y Coordinate')
-            # plt.axes().set_aspect('equal')
-            # fig_name = file_name + '_XY_OBJECT'
-            # plt.title(fig_name)
-            # if os.path.isfile(os.path.join(results_dir, fig_name)):
-            #     os.remove(os.path.join(results_dir, fig_name))
-            # plt.savefig(os.path.join(results_dir, fig_name))
-            # plt.show(block=False)
-            # plt.pause(0.5)
-            # plt.close()
-            #
-            # # Grid Interpolation
-            # for k in range(N_waves):
-            #     x, y = foc_xy[k, :, :, 0].flatten(), foc_xy[k, :, :, 1].flatten()
-            #     z = rms_wfe[k].flatten()
-            #
-            #     # ngridx = 100
-            #     # xi = np.linspace(x.min(), x.max(), ngridx)
-            #     # yi = np.linspace(y.min(), y.max(), ngridx)
-            #     # zi = mlab.griddata(x, y, z, xi, yi, interp='linear')
-            #
-            #     plt.figure()
-            #     # triang = tri.Triangulation(x, y)
-            #     plt.tricontour(x, y, z, 20, linewidths=0.5, colors='k')
-            #     plt.tricontourf(x, y, z, 20,
-            #                     cmap='jet')
-            #     plt.clim(vmin=0)
-            #     # plt.plot(x[::5], y[::5], 'ko', ms=2)
-            #     plt.xlabel(r'X [mm]')
-            #     plt.ylabel(r'Y [mm]')
-            #     fig_name = file_name + '_SURF' + surface_number + '_RMS_FIELDMAP_WAVE%d' % (wave_idx[k])
-            #     plt.title(fig_name)
-            #     plt.colorbar(orientation='horizontal')
-            #
-            #     plt.axes().set_aspect('equal')
-            #     if os.path.isfile(os.path.join(results_dir, fig_name)):
-            #         os.remove(os.path.join(results_dir, fig_name))
-            #     plt.savefig(os.path.join(results_dir, fig_name))
-            #     plt.show(block=False)
-            #     plt.pause(0.5)
-            #     plt.close()
-
-        return rms_wfe, obj_xy, foc_xy, global_xy, wavelengths
+        return results
 
 
     def flip_rms(self, rms_datacube):
