@@ -27,9 +27,9 @@ from win32com.client import CastTo
 # for each mode (ELT, HARMONI, IFS) and for each spaxel scale (4x4, 10x10, 20x20, 60x30)
 # for the FPRS, PO, IFU, SPEC focal planes
 focal_planes = {}
-focal_planes['IFS'] = {'4x4': {'FPRS': 6, 'PO': 41},
-                       '10x10': {'FPRS': 6, 'PO': 38},
-                       '20x20': {'FPRS': 6, 'PO': 38},
+focal_planes['IFS'] = {'4x4': {'FPRS': 6, 'PO': 41, 'IS': 70, 'SL': 88, 'DET': None},
+                       '10x10': {'FPRS': 6, 'PO': 38, 'IS': 66, 'SL': 85, 'DET': None},
+                       '20x20': {'FPRS': 6, 'PO': 38, 'IS': 66, 'SL': 85, 'DET': None},
                        '60x30': {'FPRS': 6, 'PO': 30, 'IS': 59, 'SL': 77, 'DET': None}}
 # Keywords for Focal Plane are:
 # PO: PreOptics, IS: Image Mirror, SL: Slit, DET: Detector
@@ -233,16 +233,16 @@ def create_zemax_file_list(which_system,
                     name_IFU = '_IFU-' + ifu            # For 4x4 the IFU is reversed
                 for spec in grating:
 
-                    if ifu == 'AB':
+                    if ifu == 'AB' or ifu == 'EF':
                         # For 4x4 the SPEC is also reversed, we add a '-' sign
                         name_spec = '_SPEC-' + spec if scale == '4x4' else '_SPEC' + spec
 
                     # TODO: this will probs need some fixing for scales other than 60x30
                     if ifu == 'CD' or ifu == 'GH': # _SPEC-K_LONG
-                        name_spec = '_SPEC-' + spec
+                        name_spec = '_SPEC' + spec if scale == '4x4' else '_SPEC-' + spec
 
-                    if ifu == 'EF':
-                        name_spec = '_SPEC' + spec
+                    # if ifu == 'EF':
+                    #     name_spec = '_SPEC' + spec
 
                     filename = name_scale + name_IFU + name_spec + '.zmx'
                     file_list.append(filename)
@@ -2127,8 +2127,7 @@ class RaytraceAnalysis(AnalysisGeneric):
         return [obj_xy, foc_xy, global_xy]
 
     def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
-                        configuration_idx=None, surface=None, rays_per_slice=3,
-                        plots=True):
+                        configuration_idx=None, surface=None, rays_per_slice=3):
         """
         Function that loops over a given set of E2E model Zemax files, running the analysis
         defined by self.analysis_function_raytrace
@@ -2170,6 +2169,119 @@ class RaytraceAnalysis(AnalysisGeneric):
             results.append(list_results)
 
         return results
+
+
+class EnsquaredDetector(AnalysisGeneric):
+
+    @staticmethod
+    def analysis_function_ensquared(system, wave_idx, config, surface, size, N_rays):
+
+        # Set Current Configuration
+        system.MCE.SetCurrentConfiguration(config)
+
+        # Get the Field Points for that configuration
+        sysField = system.SystemData.Fields
+        # check that the field is normalized correctly
+        if sysField.Normalization != constants.FieldNormalizationType_Radial:
+            sysField.Normalization = constants.FieldNormalizationType_Radial
+
+        N_fields = sysField.NumberOfFields
+
+        r_max = np.max([np.sqrt(sysField.GetField(i).X ** 2 +
+                                sysField.GetField(i).Y ** 2) for i in np.arange(1, N_fields + 1)])
+
+        # Get the Field Point at the centre of the Slice
+        fx, fy = sysField.GetField(2).X, sysField.GetField(2).Y
+        # Trace a Square around the centre point
+        x_min, x_max = fx - size/2, fx + size/2
+        y_min, y_max = fy - size/2, fy + size/2
+        x_up, y_up = np.linspace(x_min, x_max, N_rays), y_max * np.ones(N_rays)
+        x_down, y_down = np.linspace(x_min, x_max, N_rays), y_min * np.ones(N_rays)
+        x_left, y_left = x_min * np.ones(N_rays), np.linspace(y_min, y_max, N_rays)
+        x_right, y_right = x_max * np.ones(N_rays), np.linspace(y_min, y_max, N_rays)
+        x_mid, y_mid = fx * np.ones(N_rays), np.linspace(y_min, y_max, N_rays)
+
+        x = np.concatenate([x_down, x_right, x_up, x_left, x_mid])
+        y = np.concatenate([y_down, y_right, y_up, y_left, y_mid])
+        hx, hy = x / r_max, y / r_max
+
+        obj_xy = r_max * np.array([hx, hy]).T
+        foc_xy = np.empty((5*N_rays, 2))
+        local_xyz = np.empty((5*N_rays, 3))
+
+        raytrace = system.Tools.OpenBatchRayTrace()
+        normUnPolData = raytrace.CreateNormUnpol(5*N_rays, constants.RaysType_Real, surface)
+
+        # Loop over all Rays in the Slice
+        for i, (h_x, h_y) in enumerate(zip(hx, hy)):
+            # Add the ray to the RayTrace
+            normUnPolData.AddRay(wave_idx, h_x, h_y, 0, 0, constants.OPDMode_None)
+
+        # Run the RayTrace for the whole Slice
+        CastTo(raytrace, 'ISystemTool').RunAndWaitForCompletion()
+        normUnPolData.StartReadingResults()
+        checksum = 0
+        for i in range(5 * N_rays):
+            output = normUnPolData.ReadNextResult()
+            if output[2] == 0 and output[3] == 0:
+                local_xyz[i, 0] = output[4]
+                local_xyz[i, 1] = output[5]
+                local_xyz[i, 2] = output[6]
+
+                # Local Focal X Y
+                foc_xy[i, 0] = output[4]
+                foc_xy[i, 1] = output[5]
+                checksum += 1
+        print("Rays Traced: %d / %d" % (checksum, 5*N_rays))
+
+        normUnPolData.ClearData()
+        CastTo(raytrace, 'ISystemTool').Close()
+
+        # Get the transformation from Local to Global Coordinates
+        global_mat = system.LDE.GetGlobalMatrix(surface)
+        R11, R12, R13, R21, R22, R23, R31, R32, R33, X0, Y0, Z0 = global_mat[1:]
+        global_matrix = np.array([[R11, R12, R13],
+                                  [R21, R22, R23],
+                                  [R31, R32, R33]])
+        offset = np.array([X0, Y0, Z0])
+
+        # Transform from Local to Global and only save X and Y
+        global_xyz = (np.dot(global_matrix, local_xyz.T)).T + offset
+        global_xy = global_xyz[:, :2]
+
+        return [obj_xy, foc_xy, global_xy]
+
+    def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
+                        configuration_idx=None, surface=None, size=1.0, N_rays=100):
+
+
+        results_names = ['OBJ_XY', 'FOC_XY', 'GLOB_XY']
+        # we need to give the shapes of each array to self.run_analysis
+        results_shapes = [(5*N_rays, 2), (5*N_rays, 2), (5*N_rays, 2)]
+
+        # read the file options
+        file_list, sett_list = create_zemax_file_list(which_system=files_opt['which_system'],
+                                                      AO_modes=files_opt['AO_modes'], scales=files_opt['scales'],
+                                                      IFUs=files_opt['IFUs'], grating=files_opt['grating'])
+
+        # Loop over the Zemax files
+        results = []
+        for zemax_file, settings in zip(file_list, sett_list):
+
+            list_results = self.run_analysis(analysis_function=self.analysis_function_ensquared,
+                                             files_dir=files_dir, zemax_file=zemax_file, results_path=results_path,
+                                             results_shapes=results_shapes, results_names=results_names,
+                                             wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
+                                             surface=surface, size=size, N_rays=N_rays)
+
+            obj_xy, foc_xy, global_xy, wavelengths = list_results
+
+            # For each file we save the list of results
+            # we could use that in a Monte Carlo analysis for example
+            results.append(list_results)
+
+        return results
+
 
 
 class RMS_WFE_Analysis(AnalysisGeneric):
