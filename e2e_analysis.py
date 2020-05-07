@@ -237,12 +237,8 @@ def create_zemax_file_list(which_system,
                         # For 4x4 the SPEC is also reversed, we add a '-' sign
                         name_spec = '_SPEC-' + spec if scale == '4x4' else '_SPEC' + spec
 
-                    # TODO: this will probs need some fixing for scales other than 60x30
                     if ifu == 'CD' or ifu == 'GH': # _SPEC-K_LONG
                         name_spec = '_SPEC' + spec if scale == '4x4' else '_SPEC-' + spec
-
-                    # if ifu == 'EF':
-                    #     name_spec = '_SPEC' + spec
 
                     filename = name_scale + name_IFU + name_spec + '.zmx'
                     file_list.append(filename)
@@ -640,7 +636,8 @@ class AnalysisGeneric(object):
             wave_idx = wavelength_idx
 
         # Read the settings
-        system, surface_number = file_settings['system'], file_settings['surface']
+        system = file_settings['system']
+        surface_number = file_settings['surface']
         scale, ifu, grating = file_settings['scale'], file_settings['ifu'], file_settings['grating']
         ao_mode = file_settings['AO_mode'] if 'AO_mode' in list(file_settings.keys()) else None
         # Find out the NameCode for the surface
@@ -1791,7 +1788,7 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
     def analysis_function_geofwhm_psf(self, system, wave_idx, config, surface, N_rays, reference='ChiefRay'):
 
 
-        print("Config: ", config)
+        # print("Config: ", config)
         # Set Current Configuration
         system.MCE.SetCurrentConfiguration(config)
 
@@ -1807,13 +1804,13 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
         r_max = np.max([np.sqrt(sysField.GetField(i).X ** 2 +
                                 sysField.GetField(i).Y ** 2) for i in np.arange(1, N_fields + 1)])
 
-        fy_mean = np.mean([sysField.GetField(i).Y for i in np.arange(1, N_fields + 1)])
-        fx_mean = 1/2 * np.sum([sysField.GetField(i).X for i in np.arange(1, N_fields + 1)])
-
-        ## Add some extra field to get a better sampling
-        sysField.AddField(fx_mean, fy_mean, 1)
-        sysField.AddField(fx_mean / 3.0, fy_mean, 1)
-        N_fields = sysField.NumberOfFields
+        # fy_mean = np.mean([sysField.GetField(i).Y for i in np.arange(1, N_fields + 1)])
+        # fx_mean = 1/2 * np.sum([sysField.GetField(i).X for i in np.arange(1, N_fields + 1)])
+        #
+        # ## Add some extra field to get a better sampling
+        # sysField.AddField(fx_mean, fy_mean, 1)
+        # sysField.AddField(fx_mean / 3.0, fy_mean, 1)
+        # N_fields = sysField.NumberOfFields
 
         # Pupil Rays
         px = np.linspace(-1, 1, N_rays, endpoint=True)
@@ -1950,6 +1947,8 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
             fwhm_x = 1e3 * calculate_marginal_fwhm(joint.ax_marg_x, mode='X')
             fwhm_y = 1e3 * calculate_marginal_fwhm(joint.ax_marg_y, mode='Y')
 
+            # print("%.1f, %.1f, %.1f" % (mean_fwhm, fwhm_x, fwhm_y))
+
             # # And the projected sizes both ALONG (X) and ACROSS (Y) the slice
             # rx = np.max(vertices[:, 0]) - np.min(vertices[:, 0])        # Max(x) - Min(x)
             # ry = np.max(vertices[:, 1]) - np.min(vertices[:, 1])        # Max(y) - Min(y)
@@ -1959,27 +1958,27 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
             # ry = np.sqrt((vertices[:, 1] - ref_y) ** 2)
 
             FWHM[j, :] = [mean_fwhm, fwhm_x, fwhm_y]        # Store the results
-            ax.set_title(r"Field %d | FWHM=%.1f, Fx$=%.1f, Fy=%.1f \mu$m %s" % (j+1, mean_fwhm, fwhm_x, fwhm_y, reference))
+            ax.set_title(r"Field %d | FWHM=%.1f, Fx$=%.1f, Fy=%.1f \mu$m" % (j+1, mean_fwhm, fwhm_x, fwhm_y))
             ax.set_aspect('equal')
             # plt.legend()
 
             plt.close(joint.fig)
 
-        plt.show()
+        # plt.show()
         #
         # plt.show(block=False)
         # plt.pause(0.05)
-        # plt.close(fig)
+        plt.close(fig)
 
-        # Remember to remove the extra fields otherwise they pile up
-        sysField.RemoveField(N_fields)
-        sysField.RemoveField(N_fields - 1)
+        # # Remember to remove the extra fields otherwise they pile up
+        # sysField.RemoveField(N_fields)
+        # sysField.RemoveField(N_fields - 1)
 
         return [FWHM, obj_xy, foc_xy]
 
 
     def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
-                        configuration_idx=None, surface=None, N_rays=40):
+                        configuration_idx=None, surface=None, N_rays=40, plots=False):
         """
 
         """
@@ -1987,13 +1986,14 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
         # We want the result to produce as output: the RMS WFE array, and the RayTrace at both Object and Focal plane
         results_names = ['GEO_FWHM', 'OBJ_XY', 'FOC_XY']
         # we need to give the shapes of each array to self.run_analysis
-        results_shapes = [(5, 3), (5, 2), (5, 2)]
+        results_shapes = [(3, 3), (3, 2), (3, 2)]
 
         # read the file options
-        file_list, settings = create_zemax_file_list(which_system=files_opt['which_system'], AO_modes=files_opt['AO_modes'],
+        file_list, sett_list = create_zemax_file_list(which_system=files_opt['which_system'], AO_modes=files_opt['AO_modes'],
                                            scales=files_opt['scales'], IFUs=files_opt['IFUs'], grating=files_opt['grating'])
+        # print(settings)
 
-        for zemax_file in file_list:
+        for zemax_file, settings in zip(file_list, sett_list):
 
             list_results = self.run_analysis(analysis_function=self.analysis_function_geofwhm_psf,
                                              files_dir=files_dir,zemax_file=zemax_file, results_path=results_path,
@@ -2003,6 +2003,7 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
 
 
             geo_fwhm, obj_xy, foc_xy, wavelengths = list_results
+
             N_waves = geo_fwhm.shape[0]
 
             if wavelength_idx is None:
@@ -2015,36 +2016,72 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
             file_name = zemax_file.split('.')[0]
             results_dir = os.path.join(results_path, file_name)
             surface_number = str(surface) if surface is not None else '_IMG'
+            settings['surface'] = surface
 
+            surface_codes = focal_planes[settings['system']][settings['scale']]
+            surface_name = list(surface_codes.keys())[list(surface_codes.values()).index(surface)]
 
-            # fwhm is shape [N_waves, N_configs, N_fields, (meanR, XR, YR)]
-            for j_wave in range(N_waves):
-                x, y = foc_xy[j_wave, :, :, 0].flatten(), foc_xy[j_wave, :, :, 1].flatten()
-                triang = tri.Triangulation(x, y)
-                maxz = np.max(geo_fwhm[j_wave])
-
-                fig1, axes = plt.subplots(1, 3)
-                # ax1.set_aspect('equal')
-                titles = [r'FWHM [$\mu$m]', r'FWHM_X [$\mu$m]', r'FWHM_Y [$\mu$m]']
-                for k in range(3):
-                    ax = axes[k]
-                    tpc = ax.tripcolor(triang, geo_fwhm[j_wave, :, :, k].flatten(), shading='flat', cmap='jet')
-                    tpc.set_clim(vmin=0, vmax=maxz)
-                    ax.scatter(x, y, color='black', s=2)
-                    plt.colorbar(tpc, orientation='horizontal', ax=ax)
-                    ax.set_xlabel(r'X [mm]')
-                    if k == 0:
-                        ax.set_ylabel(r'Y [mm]')
-                    ax.set_title(titles[k])
-
-                fig_name = file_name + '_FWHM_FOCAL_SURF' + surface_number + '_WAVE%d' % wave_idx[j_wave]
-                # plt.title(fig_name)
-                if os.path.isfile(os.path.join(results_dir, fig_name)):
-                    os.remove(os.path.join(results_dir, fig_name))
-                plt.savefig(os.path.join(results_dir, fig_name))
-                plt.show(block=False)
-                plt.pause(0.5)
-                plt.close()
+            # # First thing is to create a separate folder within the results directory for this analysis
+            # analysis_dir = os.path.join(results_dir, 'FWHM')
+            # print("Analysis Results will be saved in folder: ", analysis_dir)
+            # if not os.path.exists(analysis_dir):
+            #     os.mkdir(analysis_dir)
+            #
+            # if surface == None:
+            #
+            #     x, y = foc_xy[:, :, :, 0].flatten(), foc_xy[:, :, :, 1].flatten()
+            #     triang = tri.Triangulation(x, y)
+            #     maxz = np.max(geo_fwhm)
+            #
+            #     fig1, axes = plt.subplots(1, 3)
+            #     # ax1.set_aspect('equal')
+            #     titles = [r'FWHM [$\mu$m]', r'FWHM_X [$\mu$m]', r'FWHM_Y [$\mu$m]']
+            #     for k in range(3):
+            #         ax = axes[k]
+            #         tpc = ax.tripcolor(triang, geo_fwhm[:, :, :, k].flatten(), shading='flat', cmap='jet')
+            #         tpc.set_clim(vmin=0, vmax=maxz)
+            #         ax.scatter(x, y, color='black', s=2)
+            #         plt.colorbar(tpc, orientation='horizontal', ax=ax)
+            #         ax.set_xlabel(r'X [mm]')
+            #         if k == 0:
+            #             ax.set_ylabel(r'Y [mm]')
+            #         ax.set_title(titles[k])
+            #
+            #     fig_name = file_name + '_FWHM_SURF_' + surface_name + '_DET'
+            #     # plt.title(fig_name)
+            #     if os.path.isfile(os.path.join(analysis_dir, fig_name)):
+            #         os.remove(os.path.join(analysis_dir, fig_name))
+            #     plt.savefig(os.path.join(analysis_dir, fig_name))
+            #
+            # else:
+            #     # fwhm is shape [N_waves, N_configs, N_fields, (meanR, XR, YR)]
+            #     for j_wave in range(N_waves):
+            #         x, y = foc_xy[j_wave, :, :, 0].flatten(), foc_xy[j_wave, :, :, 1].flatten()
+            #         triang = tri.Triangulation(x, y)
+            #         maxz = np.max(geo_fwhm[j_wave])
+            #
+            #         fig1, axes = plt.subplots(1, 3)
+            #         # ax1.set_aspect('equal')
+            #         titles = [r'FWHM [$\mu$m]', r'FWHM_X [$\mu$m]', r'FWHM_Y [$\mu$m]']
+            #         for k in range(3):
+            #             ax = axes[k]
+            #             tpc = ax.tripcolor(triang, geo_fwhm[j_wave, :, :, k].flatten(), shading='flat', cmap='jet')
+            #             tpc.set_clim(vmin=0, vmax=maxz)
+            #             ax.scatter(x, y, color='black', s=2)
+            #             plt.colorbar(tpc, orientation='horizontal', ax=ax)
+            #             ax.set_xlabel(r'X [mm]')
+            #             if k == 0:
+            #                 ax.set_ylabel(r'Y [mm]')
+            #             ax.set_title(titles[k])
+            #
+            #         fig_name = file_name + '_FWHM_SURF_' + surface_name + '_FOCAL_WAVE%d' % wave_idx[j_wave]
+            #         # plt.title(fig_name)
+            #         if os.path.isfile(os.path.join(analysis_dir, fig_name)):
+            #             os.remove(os.path.join(analysis_dir, fig_name))
+            #         plt.savefig(os.path.join(analysis_dir, fig_name))
+            #     #     plt.show(block=False)
+            #     #     plt.pause(0.5)
+            #     #     plt.close()
 
         return list_results
 
