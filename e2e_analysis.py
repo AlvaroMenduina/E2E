@@ -27,9 +27,18 @@ from win32com.client import CastTo
 # for each mode (ELT, HARMONI, IFS) and for each spaxel scale (4x4, 10x10, 20x20, 60x30)
 # for the FPRS, PO, IFU, SPEC focal planes
 focal_planes = {}
-focal_planes['IFS'] = {'4x4': {'FPRS': 6, 'PO': 41, 'IS': 70, 'SL': 88, 'DET': None},
-                       '10x10': {'FPRS': 6, 'PO': 38, 'IS': 66, 'SL': 85, 'DET': None},
-                       '20x20': {'FPRS': 6, 'PO': 38, 'IS': 66, 'SL': 85, 'DET': None},
+focal_planes['IFS'] = {'4x4': {'AB': {'FPRS': 6, 'PO': 41, 'IS': 70, 'SL': 88, 'DET': None},
+                               'CD': {'FPRS': 6, 'PO': 41, 'IS': 69, 'SL': 88, 'DET': None},
+                               'EF': {'FPRS': 6, 'PO': 41, 'IS': 70, 'SL': 88, 'DET': None},
+                               'GH': {'FPRS': 6, 'PO': 41, 'IS': 69, 'SL': 88, 'DET': None}},
+                       '10x10': {'AB': {'FPRS': 6, 'PO': 38, 'IS': 67, 'SL': 85, 'DET': None},
+                                 'CD': {'FPRS': 6, 'PO': 38, 'IS': 66, 'SL': 85, 'DET': None},
+                                 'EF': {'FPRS': 6, 'PO': 38, 'IS': 67, 'SL': 85, 'DET': None},
+                                 'GH': {'FPRS': 6, 'PO': 38, 'IS': 66, 'SL': 85, 'DET': None}},
+                       '20x20': {'AB': {'FPRS': 6, 'PO': 38, 'IS': 67, 'SL': 85, 'DET': None},
+                                 'CD': {'FPRS': 6, 'PO': 38, 'IS': 66, 'SL': 85, 'DET': None},
+                                 'EF': {'FPRS': 6, 'PO': 38, 'IS': 67, 'SL': 85, 'DET': None},
+                                 'GH': {'FPRS': 6, 'PO': 38, 'IS': 66, 'SL': 85, 'DET': None}},
                        '60x30': {'FPRS': 6, 'PO': 30, 'IS': 59, 'SL': 77, 'DET': None}}
 # Keywords for Focal Plane are:
 # PO: PreOptics, IS: Image Mirror, SL: Slit, DET: Detector
