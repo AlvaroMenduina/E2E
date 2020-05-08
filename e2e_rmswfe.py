@@ -1,0 +1,391 @@
+"""
+
+
+"""
+
+# Change to the Slicer Mirror
+# Then the Slit
+# Detector, object per wavelength
+# Add statistics: min, max, mean
+# histogram
+# text files
+
+
+import os
+import numpy as np
+import e2e_analysis as e2e
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+import matplotlib.tri as tri
+
+
+def stitch_fields(zosapi, spaxel_scale, spaxels_per_slice, wavelength_idx, spectral_band='HK', plane='FS', show='focal'):
+    """
+    Loop over the IFU sections AB, CD, EF, GH and calculate the RMS WFE map for each case
+    Gather the results and stitch them together to get a complete Field Map of the IFU
+
+    We can specify the Focal Plane at which we calculate the RMS. For example:
+    'PO': preoptics, 'FS': field splitter, 'DET': detector
+
+    We have to be careful with the plot format because the coordinate systems vary depending on
+    the focal plane we choose. Moreover, we can choose whether to refer the results to 'object' or
+    'focal' coordinates, and also depends on the surface. For instance, if we go to the DETECTOR plane,
+    it makes no sense to use 'object' coordinates because the wavelengths would overlap, we must use 'focal'
+
+    If
+
+    :param spaxel_scale: string, spaxel scale like '60x30'
+    :param spaxels_per_slice: how many points to sample each slice.
+    :param wavelength_idx:
+    :param spectral_band:
+    :param plane:
+    :param show:
+    :return:
+    """
+
+    ifu_sections = ['AB', 'CD', 'EF', 'GH']
+    analysis = e2e.RMS_WFE_Analysis(zosapi=zosapi)
+    rms_maps, object_coord, focal_coord = [], [], []
+    # Loop over the IFU sections
+    for ifu_section in ifu_sections:
+        options = {'which_system': 'IFS', 'AO_modes': [], 'scales': [spaxel_scale], 'IFUs': [ifu_section],
+                   'grating': [spectral_band]}
+        focal_plane = e2e.focal_planes['IFS'][spaxel_scale][ifu_section][plane]
+        list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options,
+                                                                  results_path=results_path,
+                                                                  wavelength_idx=wavelength_idx,
+                                                                  configuration_idx=None, surface=focal_plane,
+                                                                  spaxels_per_slice=spaxels_per_slice, plots=False)
+        # Only 1 list, no Monte Carlo
+        rms_wfe, obj_xy, foc_xy, global_xy, waves = list_results[0]
+
+        rms_maps.append(rms_wfe)
+        focal_coord.append(foc_xy)
+        object_coord.append(obj_xy)
+
+    rms_field = np.concatenate(rms_maps, axis=1)
+    obj_xy = np.concatenate(object_coord, axis=1)
+    foc_xy = np.concatenate(focal_coord, axis=1)
+
+    if plane != 'DET':
+
+        min_rms = np.min(rms_field)
+        max_rms = np.max(rms_field)
+
+        for j_wave, wavelength in enumerate(waves):
+
+            if show == 'object':
+                x, y = obj_xy[j_wave, :, :, 0].flatten(), obj_xy[j_wave, :, :, 1].flatten()
+                axis_label = 'Object Plane'
+                ref = 'OBJ'
+            elif show == 'focal':
+                x, y = foc_xy[j_wave, :, :, 0].flatten(), foc_xy[j_wave, :, :, 1].flatten()
+                axis_label = 'Focal Plane'
+                ref = 'FOC'
+            else:
+                raise ValueError("'show' must be either 'object' or 'focal'")
+
+            triang = tri.Triangulation(x, y)
+
+            fig1, ax = plt.subplots(1, 1)
+            ax.set_aspect('equal')
+            tpc = ax.tripcolor(triang, rms_field[j_wave, :, :].flatten(), shading='flat', cmap='jet')
+            tpc.set_clim(vmin=min_rms, vmax=max_rms)
+            # ax.scatter(x, y, s=2, color='black')
+            ax.set_xlabel(axis_label + r' X [mm]')
+            ax.set_ylabel(axis_label + r' Y [mm]')
+            title = r'RMS Field Map Stitched IFU | %s mas %s %.3f $\mu$m' % (spaxel_scale, spectral_band, wavelength)
+            ax.set_title(title)
+            plt.colorbar(tpc, ax=ax)
+            fig_name = "STITCHED_RMSMAP_%s_SPEC_%s_%s_SURF_%s_WAVE%d" % (
+            spaxel_scale, spectral_band, ref, plane, wavelength_idx[j_wave])
+            if os.path.isfile(os.path.join(results_path, fig_name)):
+                os.remove(os.path.join(results_path, fig_name))
+            fig1.savefig(os.path.join(results_path, fig_name))
+
+    if plane == 'DET':
+        # For the detector plane we want to plot ALL wavelengths at the same time!
+        # And using the FOCAL PLANE COORDINATES as reference
+        # at the Object plane there is an overlap in wavelength!!
+
+        min_rms = np.min(rms_field)
+        max_rms = np.max(rms_field)
+
+        fig, axes = plt.subplots(2, 2)
+        for i in range(2):
+            for j in range(2):
+                k = 2 * i + j
+                ifu_section = ifu_sections[k]
+                ax = axes[i][j]
+                _foc_xy = focal_coord[k]
+                _rms_field = rms_maps[k]
+
+                x, y = _foc_xy[:, :, :, 0].flatten(), _foc_xy[:, :, :, 1].flatten()
+                triang = tri.Triangulation(x, y)
+
+                # Remove the flat triangles at the detector edges that appear because of the field curvature
+                min_circle_ratio = .05
+                mask = tri.TriAnalyzer(triang).get_flat_tri_mask(min_circle_ratio)
+                triang.set_mask(mask)
+
+                tpc = ax.tripcolor(triang, _rms_field.flatten(), shading='flat', cmap='jet')
+                tpc.set_clim(vmin=min_rms, vmax=max_rms)
+                # ax.scatter(x, y, s=2, color='black')
+                axis_label = 'Detector'
+                ax.set_xlabel(axis_label + r' X [mm]')
+                ax.set_ylabel(axis_label + r' Y [mm]')
+                ax.set_aspect('equal')
+                plt.colorbar(tpc, ax=ax, orientation='horizontal')
+                title = r'IFU-%s' % (ifu_section)
+                ax.set_title(title)
+                fig_name = "RMSMAP_%s_DETECTOR_SPEC_%s" % (spaxel_scale, spectral_band)
+                if os.path.isfile(os.path.join(results_path, fig_name)):
+                    os.remove(os.path.join(results_path, fig_name))
+                fig.savefig(os.path.join(results_path, fig_name))
+
+    return rms_field, obj_xy, foc_xy, rms_maps, object_coord, focal_coord
+
+def image_slicer_analysis(zosapi, spaxel_scale, spaxels_per_slice, wavelength_idx, grating, files_path, results_path):
+    """
+
+    The Stitching does not work at the surface BEFORE the Image Slicer if you use the Focal Plane Coordinates
+    because the Odd/Even configurations overlap
+
+    For that reason, we need to treat this surface differently. We have to split the results between
+    Odd / Even configurations (i.e. the A and B paths) and plot them alongside, rather than stitching
+
+    :param zosapi:
+    :param spaxel_scale:
+    :param spaxels_per_slice:
+    :param wavelength_idx:
+    :param grating:
+    :param files_path:
+    :param results_path:
+    :return:
+    """
+
+
+    # Based on the Field Definition from HRM-00261 and looking at the E2E Zemax files
+    # to see which Configurations have Positive or Negative field values.
+    ifu_configs = {'AB': {'Odd': 'A', 'Even': 'B'},
+                   'CD': {'Even': 'C', 'Odd': 'D'},
+                   'EF': {'Odd': 'E', 'Even': 'F'},
+                   'GH': {'Even': 'G', 'Odd': 'H'}}
+
+    analysis = e2e.RMS_WFE_Analysis(zosapi=zosapi)
+
+
+    for ifu in ['AB', 'CD', 'EF', 'GH']:        # Loop over IFU sections
+
+        options = {'which_system': 'IFS', 'AO_modes': [], 'scales': [spaxel_scale], 'IFUs': [ifu],
+                   'grating': [grating]}
+        focal_plane = e2e.focal_planes['IFS'][spaxel_scale][ifu]['IS']
+
+        zemax_files, settings = e2e.create_zemax_file_list(which_system='IFS', scales=[spaxel_scale], IFUs=[ifu],
+                                                 grating=[grating], AO_modes=[])
+        zemax_file = zemax_files[0]
+        print(zemax_file)
+        file_name = zemax_file.split('.')[0]
+        results_dir = os.path.join(results_path, file_name)
+
+        list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options,
+                                                                  results_path=results_path, wavelength_idx=wavelength_idx,
+                                                                  configuration_idx=None, surface=focal_plane,
+                                                                  spaxels_per_slice=spaxels_per_slice, plots=False)
+
+        rms_wfe, obj_xy, foc_xy, global_xy, waves = list_results[0]
+
+        analysis_dir = os.path.join(results_dir, 'RMS_WFE')
+        print("Analysis Results will be saved in folder: ", analysis_dir)
+        if not os.path.exists(analysis_dir):
+            os.mkdir(analysis_dir)
+
+        fig, axes = plt.subplots(1, 2)
+        configs = ['Even', 'Odd']
+        colors = ['black', 'white']
+        min_rms, max_rms = np.min(rms_wfe[0]), np.max(rms_wfe[0])
+        for i in range(2):
+            ax = axes[i]
+            x, y = foc_xy[0, 1 - i::2, :, 0].flatten(), foc_xy[0, 1 - i::2, :, 1].flatten()
+            triang = tri.Triangulation(x, y)
+            tpc = ax.tripcolor(triang, rms_wfe[0, 1 - i::2, :].flatten(), shading='flat', cmap='jet')
+            tpc.set_clim(vmin=min_rms, vmax=max_rms)
+            ax.scatter(x, y, s=2, color=colors[i])
+            ax.set_xlabel(r'Focal Plane X [mm]')
+            if i == 0:
+                ax.set_ylabel(r'Focal Plane Y [mm]')
+            ax.set_aspect('equal')
+            ax.set_title('IFU-%s | %s' % (ifu_configs[ifu][configs[i]], configs[i]))
+            plt.colorbar(tpc, ax=ax, orientation='horizontal')
+
+        fig_name = file_name + '_RMSWFE_IMAGE_SLICER_WAVE0'
+        if os.path.isfile(os.path.join(analysis_dir, fig_name)):
+            os.remove(os.path.join(analysis_dir, fig_name))
+        fig.savefig(os.path.join(analysis_dir, fig_name))
+        # plt.close(fig)
+
+    return
+
+def slit_analysis(zosapi, spaxel_scale, spaxels_per_slice, wavelength_idx, grating, files_path, results_path):
+
+    analysis = e2e.RMS_WFE_Analysis(zosapi=zosapi)
+
+
+
+    for ifu in ['AB', 'CD', 'EF', 'GH']:
+
+        options = {'which_system': 'IFS', 'AO_modes': [], 'scales': [spaxel_scale], 'IFUs': [ifu], 'grating': [grating]}
+        slit_plane = e2e.focal_planes['IFS'][spaxel_scale][ifu]['SL']
+
+        zemax_files, settings = e2e.create_zemax_file_list(which_system='IFS', scales=[spaxel_scale], IFUs=[ifu],
+                                                 grating=[grating], AO_modes=[])
+        zemax_file = zemax_files[0]
+        print(zemax_file)
+        file_name = zemax_file.split('.')[0]
+        results_dir = os.path.join(results_path, file_name)
+
+        list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options,
+                                                          results_path=results_path, wavelength_idx=wavelength_idx,
+                                                          configuration_idx=None, surface=slit_plane,
+                                                          spaxels_per_slice=spaxels_per_slice, plots=False)
+
+        rms_slit, obj_xy, foc_xy, waves = list_results[0]
+
+        analysis_dir = os.path.join(results_dir, 'RMS_WFE')
+        print("Analysis Results will be saved in folder: ", analysis_dir)
+        if not os.path.exists(analysis_dir):
+            os.mkdir(analysis_dir)
+
+        i_wave = 0
+        min_rms = np.min(rms_slit[i_wave])
+        max_rms = np.max(rms_slit[i_wave])
+        smin, smax = 5, 20
+        fig, axes = plt.subplots(2, 1, figsize=(10, 8))
+        for j, (label, marker) in enumerate(zip(['Odd', 'Even'], ['^', 'v'])):
+
+            ax = axes[j]
+            foc_x = foc_xy[i_wave, j::2, :, 0].flatten()
+            foc_y = foc_xy[i_wave, j::2, :, 1].flatten()
+            rms_values = rms_slit[i_wave, j::2, :].flatten()
+
+            ratios = (rms_values - min_rms) / (max_rms - min_rms)
+            s = smin + (smax - smin) * ratios
+
+            scat = ax.scatter(foc_x, foc_y, s=s, label=label, marker=marker, c=rms_values, cmap='jet')
+            scat.set_clim(vmin=min_rms, vmax=max_rms)
+            plt.colorbar(scat, ax=ax, orientation='horizontal')
+            ax.set_xlabel('X [mm]')
+            ax.set_ylabel('Y [mm]')
+            ax.legend()
+
+        plt.tight_layout()
+
+        fig_name = file_name + '_RMSWFE_SLITS_WAVE1'
+        if os.path.isfile(os.path.join(analysis_dir, fig_name)):
+            os.remove(os.path.join(analysis_dir, fig_name))
+        fig.savefig(os.path.join(analysis_dir, fig_name))
+        plt.close(fig)
+
+    return
+
+
+if __name__ == """__main__""":
+
+    spaxel_scale = '4x4'
+    grating = 'H'
+
+    plt.rc('font', family='serif')
+    plt.rc('text', usetex=False)
+
+    # Create a Python Standalone Application
+    psa = e2e.PythonStandaloneApplication()
+
+    files_path = os.path.abspath("D:\End to End Model\April_2020")
+    results_path = os.path.abspath("D:\End to End Model\Results_April")
+
+    stitched_results = stitch_fields(zosapi=psa, spaxel_scale=spaxel_scale, spaxels_per_slice=21, wavelength_idx=[1],
+                                     spectral_band=grating, plane='IS', show='object')
+    plt.show()
+
+
+    " (1) Pre Image Slicer analysis "
+
+    # Here, we show why Stitching together the different IFU sections does not work for some surfaces
+    # Note: This only happens in FOCAL Plane Coordinates!
+    # Right before the Image Slicer, the focal plane coordinates for the Odd and Even configurations overlap
+    # This ruins any attempt at plotting the results for A and B sections together.
+
+    # To demonstrate this, we plot both Object and Focal coordinates for Odd/Even configurations
+    # at 2 separate surfaces: (1) exit of the PreOptics, (2) at the Image Slicer
+
+    analysis = e2e.RMS_WFE_Analysis(zosapi=psa)
+    ifu = 'AB'
+    wavelength_idx = [1]
+    spaxels_per_slice = 5
+    grating = 'HK'
+    options = {'which_system': 'IFS', 'AO_modes': [], 'scales': [spaxel_scale], 'IFUs': [ifu], 'grating': [grating]}
+    zemax_files, settings = e2e.create_zemax_file_list(which_system='IFS', scales=[spaxel_scale], IFUs=[ifu],
+                                                       grating=[grating], AO_modes=[])
+    zemax_file = zemax_files[0]
+    file_name = zemax_file.split('.')[0]
+    results_dir = os.path.join(results_path, file_name)
+    if not os.path.exists(results_dir):
+        os.mkdir(results_dir)
+    analysis_dir = os.path.join(results_dir, 'RMS_WFE')
+    print("Analysis Results will be saved in folder: ", analysis_dir)
+    if not os.path.exists(analysis_dir):
+        os.mkdir(analysis_dir)
+
+    surfaces = ['PO', 'IS']
+    surface_names = ['PreOptics', 'Image Slicer']
+
+    s = 10
+    fig, axes = plt.subplots(len(surfaces), 2, figsize=(9, 9))
+    for i, (surf, name) in enumerate(zip(surfaces, surface_names)):
+
+        focal_plane = e2e.focal_planes['IFS'][spaxel_scale][ifu][surf]
+        list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options,
+                                                                  results_path=results_path, wavelength_idx=wavelength_idx,
+                                                                  configuration_idx=None, surface=focal_plane,
+                                                                  spaxels_per_slice=spaxels_per_slice, plots=False)
+
+        rms, obj_xy, foc_xy, global_xy, waves = list_results[0]
+
+        for j, (ref, label) in enumerate(zip([obj_xy, foc_xy], ['Object', 'Focal'])):
+            ax = axes[i][j]
+            ax.scatter(ref[0, 0::2, :, 0], ref[0, 0::2, :, 1], color='blue', s=s, marker='v', alpha=0.5, label='Odd')
+            ax.scatter(ref[0, 1::2, :, 0], ref[0, 1::2, :, 1], color='red', s=s, marker='^', alpha=0.5, label='Even')
+            ax.legend(title='Configs', loc=2)
+            if i == len(surfaces) - 1:
+                ax.set_xlabel(label + r' X [mm]')
+            ax.set_ylabel(label + r' Y [mm]')
+            ax.set_title(r'IFU-%s | Surface: %s' % (ifu, name))
+
+    fig_name = file_name + '_COORDINATES'
+    if os.path.isfile(os.path.join(analysis_dir, fig_name)):
+        os.remove(os.path.join(analysis_dir, fig_name))
+    fig.savefig(os.path.join(analysis_dir, fig_name))
+    plt.close(fig)
+
+    image_slicer_analysis(zosapi=psa, spaxel_scale=spaxel_scale, spaxels_per_slice=15, wavelength_idx=[1], grating=grating,
+                          files_path=files_path, results_path=results_path)
+
+    " (2) IFU Slits "
+
+    slit_analysis(zosapi=psa, spaxel_scale=spaxel_scale, spaxels_per_slice=5, wavelength_idx=[1], grating='HK',
+                  files_path=files_path, results_path=results_path)
+
+    " (3) Stitch IFU Fields "
+
+    # H_high
+    # K
+    # K SHORT
+    # Z HIGH
+    stitched_results = stitch_fields(zosapi=psa, spaxel_scale=spaxel_scale, spaxels_per_slice=3, wavelength_idx=None,
+                                     spectral_band='VIS', plane='DET', show='focal')
+    plt.show()
+
+
+    " Pretty much all analyses "
+
+
