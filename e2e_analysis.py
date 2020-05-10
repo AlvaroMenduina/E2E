@@ -39,7 +39,10 @@ focal_planes['IFS'] = {'4x4': {'AB': {'FPRS': 6, 'PO': 41, 'IS': 70, 'SL': 88, '
                                  'CD': {'FPRS': 6, 'PO': 38, 'IS': 66, 'SL': 85, 'DET': None},
                                  'EF': {'FPRS': 6, 'PO': 38, 'IS': 67, 'SL': 85, 'DET': None},
                                  'GH': {'FPRS': 6, 'PO': 38, 'IS': 66, 'SL': 85, 'DET': None}},
-                       '60x30': {'FPRS': 6, 'PO': 30, 'IS': 59, 'SL': 77, 'DET': None}}
+                       '60x30': {'AB':{'FPRS': 6, 'PO': 30, 'IS': 59, 'SL': 77, 'DET': None},
+                                 'CD': {'FPRS': 6, 'PO': 30, 'IS': 58, 'SL': 77, 'DET': None},
+                                 'EF': {'FPRS': 6, 'PO': 30, 'IS': 59, 'SL': 77, 'DET': None},
+                                 'GH': {'FPRS': 6, 'PO': 30, 'IS': 58, 'SL': 77, 'DET': None}}}
 # Keywords for Focal Plane are:
 # PO: PreOptics, IS: Image Mirror, SL: Slit, DET: Detector
 
