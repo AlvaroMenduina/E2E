@@ -33,11 +33,12 @@ def raytrace_global(zosapi, spaxel_scale, surface_code, grating, wavelength_idx,
 
     analysis = e2e.RaytraceAnalysis(zosapi=zosapi)
 
-    surface_number = e2e.focal_planes['IFS'][spaxel_scale][surface_code]
+
 
     fig, ax = plt.subplots(1, 1)
     for ifu, color in zip(['AB', 'CD', 'EF', 'GH'], ['black', 'red', 'blue', 'green']):
         options = {'which_system': 'IFS', 'AO_modes': [], 'scales': [spaxel_scale], 'IFUs': [ifu], 'grating': [grating]}
+        surface_number = e2e.focal_planes['IFS'][spaxel_scale][ifu][surface_code]
         list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options,
                                                                     results_path=results_path, wavelength_idx=wavelength_idx,
                                                                     configuration_idx=None, surface=surface_number,
@@ -75,10 +76,10 @@ if __name__ == """__main__""":
     files_path = os.path.abspath("D:\End to End Model\April_2020")
     results_path = os.path.abspath("D:\End to End Model\Results_April")
 
-    scale = '20x20'
+    scale = '60x30'
 
     # PreOptics, Image Slicer, Slits
-    for surface_code in ['SL']:
+    for surface_code in ['PO']:
         raytrace_global(zosapi=psa, spaxel_scale=scale, surface_code=surface_code, grating='H',
                         wavelength_idx=[1], rays_per_slice=3)
 
