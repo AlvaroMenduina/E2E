@@ -447,6 +447,22 @@ if __name__ == """__main__""":
     files_path = os.path.abspath("D:\End to End Model\April_2020")
     results_path = os.path.abspath("D:\End to End Model\Results_April")
 
+    analysis = e2e.RMS_WFE_Analysis(zosapi=psa)
+    options = {'which_system': 'IFS', 'AO_modes': [], 'scales': ['60x30'], 'IFUs': ['AB'],
+               'grating': ['H']}
+    # We need to know the Surface Number for the focal plane of interest in the Zemax files
+    # this is something varies with mode, scale, ifu channel so we save those numbers on e2e.focal_planes dictionary
+    focal_plane = e2e.focal_planes['IFS']['60x30']['AB']['PO']
+    list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options, results_path=results_path,
+                                            wavelength_idx=[1, 2, 3], configuration_idx=[1, 2],
+                                            surface=focal_plane, spaxels_per_slice=5, plots=False)
+
+    path_hdf5 = os.path.join(results_path, 'CRYO_PO60x30_IFUAB_SPECH\HD5F_RMS_WFE')
+    file = os.path.join(path_hdf5, 'RMS_WFE_CRYO_PO60x30_IFUAB_SPECH.hd5f')
+
+
+    list_arrays, list_names, metadata = e2e.read_hdf5(file)
+
 
 
     " (5) Detector Plane "

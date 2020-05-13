@@ -16,6 +16,8 @@ import matplotlib.tri as tri
 import matplotlib.mlab as mlab
 import seaborn as sns
 from time import time
+import h5py
+import datetime
 
 from win32com.client.gencache import EnsureDispatch, EnsureModule
 from win32com.client import constants
@@ -144,6 +146,34 @@ class PythonStandaloneApplication(object):
             return "Standard"
         else:
             return "Invalid"
+
+
+def read_hdf5(path_to_file):
+    """
+    Read a HDF5 file from some analysis
+    :param path_to_file:
+    :return:
+    """
+
+    print("\nReading HDF5 file: ", path_to_file)
+    file = h5py.File(path_to_file, 'r')
+
+    metadata = {}
+    print("\nMetadata:")
+    for key in file['Metadata'].attrs.keys():
+        print('{} : {}'.format(key, file['Metadata'].attrs[key]))
+        metadata[key] = file['Metadata'].attrs[key]
+
+    print("\nReading Data:")
+    data = file['Data']
+    list_arrays, list_names = [], []
+    for dataset in data.keys():
+        array = data[dataset][:]  # adding [:] returns a numpy array
+        print("%s | " % dataset, array.shape, array.dtype)
+        list_arrays.append(array)
+        list_names.append(dataset)
+
+    return list_arrays, list_names, metadata
 
 
 def get_fields(system, info=False):
@@ -609,6 +639,38 @@ class AnalysisGeneric(object):
 
 
         # You should return a list of arrays
+
+        return
+
+    def save_hdf5(self, analysis_name, list_results, results_names, file_name, file_settings, results_dir):
+
+        # First thing is to create a separate folder within the results directory for this analysis
+        analysis_dir = os.path.join(results_dir, 'HD5F_' + analysis_name)
+        print("Analysis Results will be saved in folder: ", analysis_dir)
+        if not os.path.exists(analysis_dir):
+            os.mkdir(analysis_dir)           # If not, create the directory to store results
+
+        hd5f_name = analysis_name + '_' + file_name + '.hd5f'
+        with h5py.File(os.path.join(analysis_dir, hd5f_name), 'w') as f:
+
+            # Save Data Arrays
+            data_group = f.create_group('Data')
+            for array, array_name in zip(list_results, results_names + ['WAVELENGTHS']):
+                data = data_group.create_dataset(array_name, data=array)
+
+            # Save Metadata
+            metadata_group = f.create_group('Metadata')
+            date_created = datetime.datetime.now()
+            date_created = date_created.strftime("%c")
+            metadata_group.attrs['(0) Date'] = date_created
+            metadata_group.attrs['(1) Analysis'] = analysis_name
+            metadata_group.attrs['(2) Zemax File'] = file_name
+            metadata_group.attrs['(3) System Mode'] = file_settings['system']
+            metadata_group.attrs['(4) Spaxel Scale'] = file_settings['scale']
+            metadata_group.attrs['(5) IFU'] = file_settings['ifu']
+            metadata_group.attrs['(6) Grating'] = file_settings['grating']
+            metadata_group.attrs['(7) AO Mode'] = file_settings['AO_mode'] if 'AO_mode' in list(file_settings.keys()) else 'NA'
+            metadata_group.attrs['(8) Surface Number'] = file_settings['surface']
 
         return
 
@@ -1898,32 +1960,39 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
             # the density contours.
             N_levels = 20
 
-            ax = axes[j]                # select the subplot axis to place the results
-            sns.set_style("white")
+            # ax = axes[j]                # select the subplot axis to place the results
+            # sns.set_style("white")
+            # # contour = sns.kdeplot(x, y, n_levels=N_levels, ax=ax)       # Kernel Density Estimate with Seaborn
             # contour = sns.kdeplot(x, y, n_levels=N_levels, ax=ax)       # Kernel Density Estimate with Seaborn
-            contour = sns.kdeplot(x, y, n_levels=N_levels, ax=ax)       # Kernel Density Estimate with Seaborn
-            half_contour = contour.collections[N_levels//2]             # Select the 50% level contour
-            path = half_contour.get_paths()[0]                          # Select the path for that contour
-            vertices = path.vertices                                    # Select vertices of that contour
-            N_segments = vertices.shape[0]
+            # half_contour = contour.collections[N_levels//2]             # Select the 50% level contour
+            # path = half_contour.get_paths()[0]                          # Select the path for that contour
+            # vertices = path.vertices                                    # Select vertices of that contour
+            # N_segments = vertices.shape[0]
+            #
+            # ax.scatter(x, y, color='blue', s=1)                         # Plot the cloud of Rays
+            # # ax.scatter(ref_x, ref_y, label=reference, color='green')  # Plot the reference point
+            # ax.scatter(vertices[:, 0], vertices[:, 1], color='red', s=5)
+            # if N_segments < 20:     # Warn me that the contour has too few vertices
+            #     print("Warning: Too few points (%d) along the 50 percent contour" % N_segments)
+            #     print("Results may be innacurate")
+            #
+            #     # new contour
+            #     next_contour = contour.collections[N_levels // 2 - 1]
+            #     next_path = next_contour.get_paths()[0]
+            #     next_vertices = next_path.vertices
+            #     N_next = next_vertices.shape[0]
+            #     print("Next Contour: %d" % N_next)
 
-            ax.scatter(x, y, color='blue', s=1)                         # Plot the cloud of Rays
-            # ax.scatter(ref_x, ref_y, label=reference, color='green')  # Plot the reference point
-            ax.scatter(vertices[:, 0], vertices[:, 1], color='red', s=5)
-            if N_segments < 20:     # Warn me that the contour has too few vertices
-                print("Warning: Too few points along the 50 percent contour")
-                print("Results may be innacurate")
-
-            # Old approach that sometimes fails because it uses very few point in the contour
+                # Old approach that sometimes fails because it uses very few point in the contour
             # half_segments = half_contour.get_segments()[0]
             # half_positions = half_contour.get_positions()
 
-            # Once we have the points that define the 50% contour we can use that to
-            # calculate the FWHM
-            radii = np.sqrt((vertices[:, 0] - ref_x) ** 2 + (vertices[:, 1] - ref_y) ** 2)
-            mean_fwhm = 2 * 1e3 * np.mean(radii)            # Twice the mean distance between contour and ref. point
-
-            # Marginal distributions - Across and Along the slice
+            # # Once we have the points that define the 50% contour we can use that to
+            # # calculate the FWHM
+            # radii = np.sqrt((vertices[:, 0] - ref_x) ** 2 + (vertices[:, 1] - ref_y) ** 2)
+            # mean_fwhm = 2 * 1e3 * np.mean(radii)            # Twice the mean distance between contour and ref. point
+            #
+            # # Marginal distributions - Across and Along the slice
 
             sns.set_style("white")
             joint = sns.jointplot(x=x, y=y, kind='kde')
@@ -1969,9 +2038,9 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
             # rx = np.sqrt((vertices[:, 0] - ref_x) ** 2)
             # ry = np.sqrt((vertices[:, 1] - ref_y) ** 2)
 
-            FWHM[j, :] = [mean_fwhm, fwhm_x, fwhm_y]        # Store the results
-            ax.set_title(r"Field %d | FWHM=%.1f, Fx$=%.1f, Fy=%.1f \mu$m" % (j+1, mean_fwhm, fwhm_x, fwhm_y))
-            ax.set_aspect('equal')
+            FWHM[j, :] = [-99, fwhm_x, fwhm_y]        # Store the results
+            # ax.set_title(r"Field %d | FWHM=%.1f, Fx$=%.1f, Fy=%.1f \mu$m" % (j+1, mean_fwhm, fwhm_x, fwhm_y))
+            # ax.set_aspect('equal')
             # plt.legend()
 
             plt.close(joint.fig)
@@ -2016,22 +2085,22 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
 
             geo_fwhm, obj_xy, foc_xy, wavelengths = list_results
 
-            N_waves = geo_fwhm.shape[0]
-
-            if wavelength_idx is None:
-                wave_idx = np.arange(1, N_waves + 1)
-            else:
-                wave_idx = wavelength_idx
-
-
-            # Post-Processing the results
-            file_name = zemax_file.split('.')[0]
-            results_dir = os.path.join(results_path, file_name)
-            surface_number = str(surface) if surface is not None else '_IMG'
-            settings['surface'] = surface
-
-            surface_codes = focal_planes[settings['system']][settings['scale']]
-            surface_name = list(surface_codes.keys())[list(surface_codes.values()).index(surface)]
+            # N_waves = geo_fwhm.shape[0]
+            #
+            # if wavelength_idx is None:
+            #     wave_idx = np.arange(1, N_waves + 1)
+            # else:
+            #     wave_idx = wavelength_idx
+            #
+            #
+            # # Post-Processing the results
+            # file_name = zemax_file.split('.')[0]
+            # results_dir = os.path.join(results_path, file_name)
+            # surface_number = str(surface) if surface is not None else '_IMG'
+            # settings['surface'] = surface
+            #
+            # surface_codes = focal_planes[settings['system']][settings['scale']]
+            # surface_name = list(surface_codes.keys())[list(surface_codes.values()).index(surface)]
 
             # # First thing is to create a separate folder within the results directory for this analysis
             # analysis_dir = os.path.join(results_dir, 'FWHM')
@@ -2496,9 +2565,15 @@ class RMS_WFE_Analysis(AnalysisGeneric):
             results_dir = os.path.join(results_path, file_name)
             settings['surface'] = surface
 
+            self.save_hd5f(analysis_name='RMS_WFE', list_results=list_results, results_names=results_names,
+                           file_name=file_name, file_settings=settings, results_dir=results_dir, wavelength_idx=wavelength_idx)
+
             if plots is True:
                 self.plot_and_save(analysis_name='RMS_WFE', list_results=list_results, file_name=file_name,
                                    file_settings=settings, results_dir=results_dir, wavelength_idx=wavelength_idx)
+
+
+
 
 
         return results
