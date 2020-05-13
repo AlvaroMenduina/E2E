@@ -642,35 +642,91 @@ class AnalysisGeneric(object):
 
         return
 
-    def save_hdf5(self, analysis_name, list_results, results_names, file_name, file_settings, results_dir):
+    def save_hdf5(self, analysis_name, analysis_metadata, list_results, results_names, file_name, file_settings, results_dir):
 
         # First thing is to create a separate folder within the results directory for this analysis
-        analysis_dir = os.path.join(results_dir, 'HD5F_' + analysis_name)
-        print("Analysis Results will be saved in folder: ", analysis_dir)
-        if not os.path.exists(analysis_dir):
-            os.mkdir(analysis_dir)           # If not, create the directory to store results
+        hdf5_dir = os.path.join(results_dir, 'HDF5')
+        print("Analysis Results will be saved in folder: ", hdf5_dir)
+        if not os.path.exists(hdf5_dir):
+            os.mkdir(hdf5_dir)           # If not, create the directory to store results
 
-        hd5f_name = analysis_name + '_' + file_name + '.hd5f'
-        with h5py.File(os.path.join(analysis_dir, hd5f_name), 'w') as f:
+        hdf5_file = file_name + '.hdf5'
+        # Check whether the file already exists
+        if os.path.isfile(os.path.join(hdf5_dir, hdf5_file)):   # Overwrite it
+            print("HDF5 file already exists. Adding analysis")
+            with h5py.File(os.path.join(hdf5_dir, hdf5_file), 'r+') as f:
 
-            # Save Data Arrays
-            data_group = f.create_group('Data')
-            for array, array_name in zip(list_results, results_names + ['WAVELENGTHS']):
-                data = data_group.create_dataset(array_name, data=array)
+                # Here we have 2 options: either we are adding another analysis type or we are adding the same type
+                # but with different settings (such as at a different surface)
+                file_keys = list(f.keys())
+                if analysis_name in file_keys:
+                    print("Analysis type already exists")
+                    analysis_group = f[analysis_name]
+                    # we need to know how many analyses of the same type already exist
+                    subgroup_keys = list(analysis_group.keys())
+                    subgroup_number = len(subgroup_keys)        # if [0, 1] already exist we call it '2'
+                    subgroup = analysis_group.create_group(str(subgroup_number))
+                    # Save results datasets
+                    for array, array_name in zip(list_results, results_names + ['WAVELENGTHS']):
+                        data = subgroup.create_dataset(array_name, data=array)
+                    # Save analysis metadata
+                    subgroup.attrs['Analysis Type'] = analysis_name
+                    date_created = datetime.datetime.now().strftime("%c")
+                    subgroup.attrs['Date'] = date_created
+                    subgroup.attrs['At Surface #'] = file_settings['surface']
+                    # Add whatever extra metadata we have:
+                    for key, value in analysis_metadata.items():
+                        subgroup.attrs[key] = value
 
-            # Save Metadata
-            metadata_group = f.create_group('Metadata')
-            date_created = datetime.datetime.now()
-            date_created = date_created.strftime("%c")
-            metadata_group.attrs['(0) Date'] = date_created
-            metadata_group.attrs['(1) Analysis'] = analysis_name
-            metadata_group.attrs['(2) Zemax File'] = file_name
-            metadata_group.attrs['(3) System Mode'] = file_settings['system']
-            metadata_group.attrs['(4) Spaxel Scale'] = file_settings['scale']
-            metadata_group.attrs['(5) IFU'] = file_settings['ifu']
-            metadata_group.attrs['(6) Grating'] = file_settings['grating']
-            metadata_group.attrs['(7) AO Mode'] = file_settings['AO_mode'] if 'AO_mode' in list(file_settings.keys()) else 'NA'
-            metadata_group.attrs['(8) Surface Number'] = file_settings['surface']
+                else:       # It's a new analysis type
+
+                    # (2) Create a Group for this analysis
+                    analysis_group = f.create_group(analysis_name)
+                    # (3) Create a Sub-Group so that we can have the same analysis at multiple surfaces / wavelength ranges
+                    subgroup = analysis_group.create_group('0')
+                    # Save results datasets
+                    for array, array_name in zip(list_results, results_names + ['WAVELENGTHS']):
+                        data = subgroup.create_dataset(array_name, data=array)
+                    # Save analysis metadata
+                    subgroup.attrs['Analysis Type'] = analysis_name
+                    date_created = datetime.datetime.now().strftime("%c")
+                    subgroup.attrs['Date'] = date_created
+                    subgroup.attrs['At Surface #'] = file_settings['surface']
+                    # Add whatever extra metadata we have:
+                    for key, value in analysis_metadata.items():
+                        subgroup.attrs[key] = value
+
+
+        else:       # File does not exist, we create it now
+            print("Creating HDF5 file: ", hdf5_file)
+            with h5py.File(os.path.join(hdf5_dir, hdf5_file), 'w') as f:
+
+                # (1) Save Zemax Metadata
+                zemax_metadata = f.create_group('Zemax Metadata')
+                zemax_metadata.attrs['(1) Zemax File'] = file_name
+                zemax_metadata.attrs['(2) System Mode'] = file_settings['system']
+                zemax_metadata.attrs['(3) Spaxel Scale'] = file_settings['scale']
+                zemax_metadata.attrs['(4) IFU'] = file_settings['ifu']
+                zemax_metadata.attrs['(5) Grating'] = file_settings['grating']
+                AO = file_settings['AO_mode'] if 'AO_mode' in list(file_settings.keys()) else 'NA'
+                zemax_metadata.attrs['(6) AO Mode'] = AO
+
+                # (2) Create a Group for this analysis
+                analysis_group = f.create_group(analysis_name)
+
+                # (3) Create a Sub-Group so that we can have the same analysis at multiple surfaces / wavelength ranges
+                subgroup = analysis_group.create_group('0')
+                # Save results datasets
+                for array, array_name in zip(list_results, results_names + ['WAVELENGTHS']):
+                    data = subgroup.create_dataset(array_name, data=array)
+                # Save analysis metadata
+                subgroup.attrs['Analysis Type'] = analysis_name
+                date_created = datetime.datetime.now().strftime("%c")
+                subgroup.attrs['Date'] = date_created
+                subgroup.attrs['At Surface #'] = file_settings['surface']
+                # Add whatever extra metadata we have:
+                for key, value in analysis_metadata.items():
+                    subgroup.attrs[key] = value
 
         return
 
@@ -2542,6 +2598,12 @@ class RMS_WFE_Analysis(AnalysisGeneric):
         # we need to give the shapes of each array to self.run_analysis
         results_shapes = [(spaxels_per_slice,), (spaxels_per_slice, 2), (spaxels_per_slice, 2), (spaxels_per_slice, 2)]
 
+        metadata = {}
+        metadata['Spaxels per slice'] = spaxels_per_slice
+        metadata['Configurations'] = 'All' if configuration_idx is None else configuration_idx
+        metadata['Wavelengths'] = 'All' if wavelength_idx is None else wavelength_idx
+
+
         # read the file options
         file_list, sett_list = create_zemax_file_list(which_system=files_opt['which_system'],
                                                       AO_modes=files_opt['AO_modes'], scales=files_opt['scales'],
@@ -2565,8 +2627,8 @@ class RMS_WFE_Analysis(AnalysisGeneric):
             results_dir = os.path.join(results_path, file_name)
             settings['surface'] = surface
 
-            self.save_hd5f(analysis_name='RMS_WFE', list_results=list_results, results_names=results_names,
-                           file_name=file_name, file_settings=settings, results_dir=results_dir, wavelength_idx=wavelength_idx)
+            self.save_hdf5(analysis_name='RMS_WFE', analysis_metadata=metadata, list_results=list_results, results_names=results_names,
+                           file_name=file_name, file_settings=settings, results_dir=results_path)
 
             if plots is True:
                 self.plot_and_save(analysis_name='RMS_WFE', list_results=list_results, file_name=file_name,
