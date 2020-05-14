@@ -454,52 +454,21 @@ if __name__ == """__main__""":
     # this is something varies with mode, scale, ifu channel so we save those numbers on e2e.focal_planes dictionary
     focal_plane = e2e.focal_planes['IFS']['60x30']['AB']['PO']
     list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options, results_path=results_path,
-                                            wavelength_idx=[1, 2], configuration_idx=[1, 2],
-                                            surface=focal_plane, spaxels_per_slice=5, plots=False)
+                                            wavelength_idx=None, configuration_idx=None,
+                                            surface=focal_plane, spaxels_per_slice=15, plots=False)
 
-    list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options, results_path=results_path,
-                                            wavelength_idx=[3, 4], configuration_idx=[1, 2, 34],
-                                            surface=focal_plane, spaxels_per_slice=7, plots=False)
+    # list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options, results_path=results_path,
+    #                                         wavelength_idx=[3, 4], configuration_idx=[1, 2, 34],
+    #                                         surface=focal_plane, spaxels_per_slice=7, plots=False)
 
 
     import h5py
     path_hdf5 = os.path.join(results_path, 'HDF5')
     path_to_file = os.path.join(path_hdf5, 'CRYO_PO60x30_IFUAB_SPECH.hdf5')
 
-    def read_hdf5(path_to_file):
 
-        print("\nReading HDF5 file: ", path_to_file)
-        file = h5py.File(path_to_file, 'r')
 
-        # List the groups
-        groups = list(file.keys())
-        print("Groups available: ", groups)
-
-        # Read Zemax Metadata
-        zemax_metadata = {}
-        print("\nZemax Metadata:")
-        for key in file['Zemax Metadata'].attrs.keys():
-            print('{} : {}'.format(key, file['Zemax Metadata'].attrs[key]))
-            zemax_metadata[key] = file['Zemax Metadata'].attrs[key]
-
-        # Read the analysis groups
-        for group_name in groups:
-            if group_name != 'Zemax Metadata':
-                analysis_group = file[group_name]
-                print('\nAnalysis: ', group_name)
-                # For each Analysis Group we loop over subgroups
-                for subgroup_key in analysis_group.keys():
-                    subgroup = analysis_group[subgroup_key]
-                    print('Subgroup #', subgroup_key)
-                    # List the metadata of the subgroup
-                    for att_key in subgroup.attrs.keys():
-                        print('     {} : {}'.format(att_key, subgroup.attrs[att_key]))
-
-        file.close()
-
-        return zemax_metadata
-
-    zemax_metadata = read_hdf5(path_to_file)
+    zemax_metadata = e2e.read_hdf5(path_to_file)
 
 
 

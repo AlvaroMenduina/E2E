@@ -18,10 +18,16 @@ import seaborn as sns
 from time import time
 import h5py
 import datetime
+from sklearn.neighbors import KernelDensity
 
 from win32com.client.gencache import EnsureDispatch, EnsureModule
 from win32com.client import constants
 from win32com.client import CastTo
+
+# Get the module version from Git
+import git
+repo = git.Repo(search_parent_directories=True)
+sha = repo.head.object.hexsha
 
 # Parameters
 
@@ -46,19 +52,7 @@ focal_planes['IFS'] = {'4x4': {'AB': {'FPRS': 6, 'PO': 41, 'IS': 70, 'SL': 88, '
                                  'EF': {'FPRS': 6, 'PO': 30, 'IS': 59, 'SL': 77, 'DET': None},
                                  'GH': {'FPRS': 6, 'PO': 30, 'IS': 58, 'SL': 77, 'DET': None}}}
 # Keywords for Focal Plane are:
-# PO: PreOptics, IS: Image Mirror, SL: Slit, DET: Detector
-
-# 61 Slicer Mirror
-# 77 Slit
-# 85 Collimator 1
-# 92 Collimator 2
-# 99 Collimator 3
-# 123 Grating
-
-# mydict = {'FPRS': 6, 'PO': 30, 'FS': 58, 'SM': 61, 'SL': 77, 'DET': None}
-#
-# x = list(mydict.keys())[list(mydict.values()).index(61)]
-
+# PO: PreOptics, IS: Image Slicer, SL: Slit, DET: Detector
 
 # Taken from Zemax example code
 class PythonStandaloneApplication(object):
@@ -150,7 +144,25 @@ class PythonStandaloneApplication(object):
 
 def read_hdf5(path_to_file):
     """
-    Read a HDF5 file from some analysis
+    Read a HDF5 file containing some analysis results
+
+    HDF5 files for the E2E analysis have the following 'Group' structure:
+
+        (1) "Zemax Metadata": this Group is a dictionary containing metadata on the Zemax file used in the analysis
+            this includes: file name, system mode, spaxel scale, IFU channel, grating, AO modes
+            Plus the Git hash for the E2E Python code [for traceability]
+
+        (2) Analysis Name 1: each analysis type (RMS_WFE, FWHM_PSF) will have an associated group. Within each group,
+            there will be an arbitrary number of subgroups.
+                - Subgroup #0: each subgroup represents an instance of that analysis type; for example an RMS WFE
+                  ran at a specific surface, with a set of parameters. Each subgroup will containing a series of
+                  datasets representing the results of the analysis, plus some associated metadata (surface, parameters)
+                - Subgroup #N: another analysis ran at a different surface, or with different sampling
+        (3) Analysis Name 2: another type of analysis
+                - [...]
+
+    TODO: at the moment this function only reads the metadata for Zemax and each Analysis.
+
     :param path_to_file:
     :return:
     """
@@ -158,22 +170,33 @@ def read_hdf5(path_to_file):
     print("\nReading HDF5 file: ", path_to_file)
     file = h5py.File(path_to_file, 'r')
 
-    metadata = {}
-    print("\nMetadata:")
-    for key in file['Metadata'].attrs.keys():
-        print('{} : {}'.format(key, file['Metadata'].attrs[key]))
-        metadata[key] = file['Metadata'].attrs[key]
+    # List the groups
+    groups = list(file.keys())
+    print("Groups available: ", groups)
 
-    print("\nReading Data:")
-    data = file['Data']
-    list_arrays, list_names = [], []
-    for dataset in data.keys():
-        array = data[dataset][:]  # adding [:] returns a numpy array
-        print("%s | " % dataset, array.shape, array.dtype)
-        list_arrays.append(array)
-        list_names.append(dataset)
+    # Read Zemax Metadata
+    zemax_metadata = {}
+    print("\nZemax Metadata:")
+    for key in file['Zemax Metadata'].attrs.keys():
+        print('{} : {}'.format(key, file['Zemax Metadata'].attrs[key]))
+        zemax_metadata[key] = file['Zemax Metadata'].attrs[key]
 
-    return list_arrays, list_names, metadata
+    # Read the analysis groups
+    for group_name in groups:
+        if group_name != 'Zemax Metadata':
+            analysis_group = file[group_name]
+            print('\nAnalysis: ', group_name)
+            # For each Analysis Group we loop over subgroups
+            for subgroup_key in analysis_group.keys():
+                subgroup = analysis_group[subgroup_key]
+                print('Subgroup #', subgroup_key)
+                # List the metadata of the subgroup
+                for att_key in subgroup.attrs.keys():
+                    print('     {} : {}'.format(att_key, subgroup.attrs[att_key]))
+
+    file.close()
+
+    return zemax_metadata
 
 
 def get_fields(system, info=False):
@@ -326,82 +349,6 @@ def create_zemax_file_list(which_system,
 
     return
 
-def from_ifu_config_to_slices(array):
-    """
-    The ordering of Configurations in the IFU Zemax files do not correspond
-    directly to Slice Numbers. Therefore, when we loop over the configurations
-    in our analyses, the results arrays are not ordered properly
-
-    This function receives and array of size [spaxels_per_slice, N_slices]
-    and reorders it into a [2 * spaxels_per_slice, N_slices // 2]
-    mapping zemax Configuration # -> Slice #
-    :param array: a [spaxels_per_slice, N_slices] array from some analysis
-    :return: a [2 * spaxels_per_slice, N_slices // 2] array with proper slice numbering
-    """
-
-    spaxels_per_slice, N_slices = array.shape
-    # New array will be [2 * spaxels_per_slice, N_slices // 2]
-    new_array = np.empty((2 * spaxels_per_slice, N_slices // 2))
-
-    for slice in np.arange(1, N_slices + 1):
-        for spaxel in np.arange(1, spaxels_per_slice + 1):
-
-            if slice % 2 == 0:  # EVEN slice number
-
-                if slice < 40:
-                    row = slice
-                else:
-                    row = 77 - slice
-                column = spaxel + spaxels_per_slice
-                new_array[column - 1, row - 1] = array[spaxels_per_slice - 1, slice - 1]
-
-            else:
-
-                if slice < 39:
-                    row = slice + 1
-                else:
-                    row = 76 - slice
-                column = spaxel
-                new_array[column - 1, row - 1] = array[spaxels_per_slice - 1, slice - 1]
-
-    return new_array
-
-
-def run_raytrace(system, surface, wave_idx, h_xy, p_xy=None):
-    """
-
-    :param system:
-    :param surface:
-    :param wave_idx:
-    :param h_xy:
-    :param p_xy:
-    :return:
-    """
-
-    N_rays = h_xy.shape[0]
-    raytrace = system.Tools.OpenBatchRayTrace()
-    normUnPolData = raytrace.CreateNormUnpol(N_rays, constants.RaysType_Real, surface)
-
-    # Loop over the rays
-    for i in range(N_rays):
-        hx, hy = h_xy[i]
-        px, py = p_xy[i] if p_xy is not None else (0.0, 0.0)
-        normUnPolData.AddRay(wave_idx, hx, hy, px, py, constants.OPDMode_None)
-
-    # Run the RayTrace for the whole Slice
-    CastTo(raytrace, 'ISystemTool').RunAndWaitForCompletion()
-    normUnPolData.StartReadingResults()
-    xy = np.zeros_like(h_xy)
-    for i in range(N_rays):
-        output = normUnPolData.ReadNextResult()
-        if output[2] == 0 and output[3] == 0:
-            xy[i, 0] = output[4]
-            xy[i, 1] = output[5]
-
-    normUnPolData.ClearData()
-    CastTo(raytrace, 'ISystemTool').Close()
-    return xy
-
 
 class AnalysisGeneric(object):
 
@@ -506,7 +453,7 @@ class AnalysisGeneric(object):
         print("Number of Configurations / Slices: ", N_configs)
         _wavelengths = get_wavelengths(system, info=False)
         N_waves = _wavelengths.shape[0]
-        field_points = get_fields(system, info=False)
+        # field_points = get_fields(system, info=False)
 
         # Let's deal with the data format
         if wavelength_idx is None:         # We use all the available wavelengths
@@ -670,6 +617,7 @@ class AnalysisGeneric(object):
                     for array, array_name in zip(list_results, results_names + ['WAVELENGTHS']):
                         data = subgroup.create_dataset(array_name, data=array)
                     # Save analysis metadata
+                    subgroup.attrs['E2E Python Git Hash'] = sha
                     subgroup.attrs['Analysis Type'] = analysis_name
                     date_created = datetime.datetime.now().strftime("%c")
                     subgroup.attrs['Date'] = date_created
@@ -688,6 +636,7 @@ class AnalysisGeneric(object):
                     for array, array_name in zip(list_results, results_names + ['WAVELENGTHS']):
                         data = subgroup.create_dataset(array_name, data=array)
                     # Save analysis metadata
+                    subgroup.attrs['E2E Python Git Hash'] = sha
                     subgroup.attrs['Analysis Type'] = analysis_name
                     date_created = datetime.datetime.now().strftime("%c")
                     subgroup.attrs['Date'] = date_created
@@ -695,7 +644,6 @@ class AnalysisGeneric(object):
                     # Add whatever extra metadata we have:
                     for key, value in analysis_metadata.items():
                         subgroup.attrs[key] = value
-
 
         else:       # File does not exist, we create it now
             print("Creating HDF5 file: ", hdf5_file)
@@ -720,6 +668,7 @@ class AnalysisGeneric(object):
                 for array, array_name in zip(list_results, results_names + ['WAVELENGTHS']):
                     data = subgroup.create_dataset(array_name, data=array)
                 # Save analysis metadata
+                subgroup.attrs['E2E Python Git Hash'] = sha
                 subgroup.attrs['Analysis Type'] = analysis_name
                 date_created = datetime.datetime.now().strftime("%c")
                 subgroup.attrs['Date'] = date_created
@@ -1179,52 +1128,147 @@ class SpotDiagramAnalysis(AnalysisGeneric):
 
         return
 
-    def plot_spot_matrix(self, spots, wavelengths, configurations, field):
 
-        N_waves = len(wavelengths)
-        # rows = int(np.sqrt())
+class SpotDiagramDetector(AnalysisGeneric):
 
-        # N_waves = obj_xy.shape[-1]
-        # colors = cm.Reds(np.linspace(0.5, 1, N_waves))
-        # N_columns = int(np.ceil(np.sqrt(N_waves)))
-        # N_rows = int(np.ceil(N_waves / N_columns))
-        # config = 0
+    def analysis_functions_spots(self, system, wave_idx, config, surface, N_rays, reference='ChiefRay'):
+
+        # colors = cm.Reds(np.linspace(0.5, 1, 23))
+        # color = colors[wave_idx - 1]
+
+
+        # Set Current Configuration
+        system.MCE.SetCurrentConfiguration(config)
+
+        # Get the Field Points for that configuration
+        sysField = system.SystemData.Fields
+
+        N_fields = sysField.NumberOfFields
+        # check that the field is normalized correctly
+        if sysField.Normalization != constants.FieldNormalizationType_Radial:
+            sysField.Normalization = constants.FieldNormalizationType_Radial
+
+        # Loop over the fields to get the Normalization Radius
+        r_max = np.max([np.sqrt(sysField.GetField(i).X ** 2 +
+                                sysField.GetField(i).Y ** 2) for i in np.arange(1, N_fields + 1)])
+
+        # Pupil Rays
+        px = np.linspace(-1, 1, N_rays, endpoint=True)
+        pxx, pyy = np.meshgrid(px, px)
+        pupil_mask = np.sqrt(pxx**2 + pyy**2) <= 1.0
+        px, py = pxx[pupil_mask], pyy[pupil_mask]
+        # How many rays are actually inside the pupil aperture?
+        N_rays_inside = px.shape[0]
+
+        XY = np.empty((1, N_rays_inside + 1, 2))     # Rays inside plus 1 for the chief ray extra
+
+        obj_xy = np.zeros((1, 2))        # (fx, fy) coordinates
+        foc_xy = np.empty((1, 2))        # raytrace results of the Centroid
+
+        if config == 1:
+            print("\nTracing %d rays to calculate FWHM PSF" % (N_rays_inside))
+
+        # fig, axes = plt.subplots(1, N_fields)
+
+        # Loop over each Field computing the Spot Diagram
+
+
+        fx, fy = sysField.GetField(2).X, sysField.GetField(2).Y
+        hx, hy = fx / r_max, fy / r_max      # Normalized field coordinates (hx, hy)
+
+        j = 0
+        obj_xy[j, :] = [fx, fy]
+
+        raytrace = system.Tools.OpenBatchRayTrace()
+        # remember to specify the surface to which you are tracing!
+        normUnPolData = raytrace.CreateNormUnpol(N_rays_inside + 1, constants.RaysType_Real, surface)
+
+        # Add the Chief Ray
+        normUnPolData.AddRay(wave_idx, hx, hy, 0.0, 0.0, constants.OPDMode_None)
+
+        for (p_x, p_y) in zip(px, py):
+            # Add the ray to the RayTrace
+            normUnPolData.AddRay(wave_idx, hx, hy, p_x, p_y, constants.OPDMode_None)
+
+        # Run the RayTrace for the whole Slice
+        CastTo(raytrace, 'ISystemTool').RunAndWaitForCompletion()
+        normUnPolData.StartReadingResults()
+        for i in range(N_rays_inside + 1):
+            output = normUnPolData.ReadNextResult()
+            if output[2] == 0 and output[3] == 0:
+                XY[j, i, 0] = output[4]
+                XY[j, i, 1] = output[5]
+
+        normUnPolData.ClearData()
+        CastTo(raytrace, 'ISystemTool').Close()
+
+        x, y = XY[j, :, 0], XY[j, :, 1]
+        chief_x, chief_y = x[0], y[0]           # We added the Chief Ray first to the BatchTrace
+        cent_x, cent_y = np.mean(x), np.mean(y)
+
+        # Select what point will be used as Reference for the FWHM
+        if reference == "Centroid":
+            ref_x, ref_y = cent_x, cent_y
+        elif reference == "ChiefRay":
+            ref_x, ref_y = chief_x, chief_y
+        else:
+            raise ValueError("reference should be 'ChiefRay' or 'Centroid'")
+
+        # Add the Reference Point to the Focal Plane Raytrace results
+        foc_xy[j, :] = [ref_x, ref_y]
+
+        # # Calculate the contours
+        # x, y = XY[j, :, 0], XY[j, :, 1]
         #
-        # scale = 3
-        # xmax, ymax = 0.04, 0.04
-        # fig, axes = plt.subplots(N_rows, N_columns, figsize=(N_columns * scale, N_rows * scale))
-        # for i in range(N_rows):
-        #     for j in range(N_columns):
-        #         k = i * N_columns + j
-        #         ax = axes[i, j]
-        #         ax.get_xaxis().set_visible(False)
-        #         ax.get_yaxis().set_visible(False)
-        #
-        #         if k >= N_waves:
-        #             fig.delaxes(ax)
-        #             continue
-        #
-        #         x = obj_xy[:, 0, config, k]
-        #         y = obj_xy[:, 1, config, k]
-        #         mx, my = np.nanmean(x), np.nanmean(y)
-        #         dx = x - mx
-        #         dy = y - my
-        #         label = r'$\lambda$ %.3f $\mu$m' % wavelengths[k]
-        #         ax.scatter(dx, dy, s=3, color=colors[k], label=label)
-        #         ax.legend()
-        #         ax.set_xlim([-xmax, xmax])
-        #         ax.set_ylim([-ymax, ymax])
-        #         ax.set_aspect('equal')
-        #
-        #         if j == 0:
-        #             ax.get_yaxis().set_visible(True)
-        #         if i == N_rows - 1:
-        #             ax.get_xaxis().set_visible(True)
-        #
-        #         ax.set_xlabel(r'X [$\mu$m]')
-        #         ax.set_ylabel(r'Y [$\mu$m]')
-        #
-        # plt.show()
+        # mx, my = np.mean(x), np.mean(y)
+        # dx, dy = 1000*(x - mx), 1000*(y - my)       # in microns
+        # ax = axes[j]
+        # ax.scatter(dx, dy, s=3, color=color)
+        # # ax.set_xlabel(r'X [mm]')
+        # # ax.set_ylabel(r'X [mm]')
+        # ax.set_xlim([-25, 25])
+        # ax.set_ylim([-25, 25])
+        # ax.set_xticklabels([])
+        # ax.set_yticklabels([])
+        # ax.set_aspect('equal')
+        # ax.xaxis.set_visible('False')
+        # ax.yaxis.set_visible('False')
+
+        return [XY, obj_xy, foc_xy]
+
+    def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
+                        configuration_idx=None, surface=None, N_rays=40, reference='ChiefRay'):
+        """
+
+        """
+
+        # We need to know how many rays are inside the pupil
+        px = np.linspace(-1, 1, N_rays, endpoint=True)
+        pxx, pyy = np.meshgrid(px, px)
+        pupil_mask = np.sqrt(pxx ** 2 + pyy ** 2) <= 1.0
+        px, py = pxx[pupil_mask], pyy[pupil_mask]
+        # How many rays are actually inside the pupil aperture?
+        N_rays_inside = px.shape[0]
+
+        # We want the result to produce as output: the RMS WFE array, and the RayTrace at both Object and Focal plane
+        results_names = ['XY', 'OBJ_XY', 'FOC_XY']
+        # we need to give the shapes of each array to self.run_analysis
+        results_shapes = [(1, N_rays_inside + 1, 2), (1, 2), (1, 2)]
+
+        # read the file options
+        file_list, settings = create_zemax_file_list(which_system=files_opt['which_system'], AO_modes=files_opt['AO_modes'],
+                                           scales=files_opt['scales'], IFUs=files_opt['IFUs'], grating=files_opt['grating'])
+
+        for zemax_file in file_list:
+
+            list_results = self.run_analysis(analysis_function=self.analysis_functions_spots,
+                                             files_dir=files_dir,zemax_file=zemax_file, results_path=results_path,
+                                             results_shapes=results_shapes, results_names=results_names,
+                                             wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
+                                             surface=surface, N_rays=N_rays, reference=reference)
+
+            return list_results
+
 
 
 class RMSSpotAnalysis(AnalysisGeneric):
@@ -1764,149 +1808,6 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
         return list_results
 
 
-class SpotDiagramDetector(AnalysisGeneric):
-
-    def analysis_functions_spots(self, system, wave_idx, config, surface, N_rays, reference='ChiefRay'):
-
-        # colors = cm.Reds(np.linspace(0.5, 1, 23))
-        # color = colors[wave_idx - 1]
-
-
-        # Set Current Configuration
-        system.MCE.SetCurrentConfiguration(config)
-
-        # Get the Field Points for that configuration
-        sysField = system.SystemData.Fields
-
-        N_fields = sysField.NumberOfFields
-        # check that the field is normalized correctly
-        if sysField.Normalization != constants.FieldNormalizationType_Radial:
-            sysField.Normalization = constants.FieldNormalizationType_Radial
-
-        # Loop over the fields to get the Normalization Radius
-        r_max = np.max([np.sqrt(sysField.GetField(i).X ** 2 +
-                                sysField.GetField(i).Y ** 2) for i in np.arange(1, N_fields + 1)])
-
-        # Pupil Rays
-        px = np.linspace(-1, 1, N_rays, endpoint=True)
-        pxx, pyy = np.meshgrid(px, px)
-        pupil_mask = np.sqrt(pxx**2 + pyy**2) <= 1.0
-        px, py = pxx[pupil_mask], pyy[pupil_mask]
-        # How many rays are actually inside the pupil aperture?
-        N_rays_inside = px.shape[0]
-
-        XY = np.empty((1, N_rays_inside + 1, 2))     # Rays inside plus 1 for the chief ray extra
-
-        obj_xy = np.zeros((1, 2))        # (fx, fy) coordinates
-        foc_xy = np.empty((1, 2))        # raytrace results of the Centroid
-
-        if config == 1:
-            print("\nTracing %d rays to calculate FWHM PSF" % (N_rays_inside))
-
-        # fig, axes = plt.subplots(1, N_fields)
-
-        # Loop over each Field computing the Spot Diagram
-
-
-        fx, fy = sysField.GetField(2).X, sysField.GetField(2).Y
-        hx, hy = fx / r_max, fy / r_max      # Normalized field coordinates (hx, hy)
-
-        j = 0
-        obj_xy[j, :] = [fx, fy]
-
-        raytrace = system.Tools.OpenBatchRayTrace()
-        # remember to specify the surface to which you are tracing!
-        normUnPolData = raytrace.CreateNormUnpol(N_rays_inside + 1, constants.RaysType_Real, surface)
-
-        # Add the Chief Ray
-        normUnPolData.AddRay(wave_idx, hx, hy, 0.0, 0.0, constants.OPDMode_None)
-
-        for (p_x, p_y) in zip(px, py):
-            # Add the ray to the RayTrace
-            normUnPolData.AddRay(wave_idx, hx, hy, p_x, p_y, constants.OPDMode_None)
-
-        # Run the RayTrace for the whole Slice
-        CastTo(raytrace, 'ISystemTool').RunAndWaitForCompletion()
-        normUnPolData.StartReadingResults()
-        for i in range(N_rays_inside + 1):
-            output = normUnPolData.ReadNextResult()
-            if output[2] == 0 and output[3] == 0:
-                XY[j, i, 0] = output[4]
-                XY[j, i, 1] = output[5]
-
-        normUnPolData.ClearData()
-        CastTo(raytrace, 'ISystemTool').Close()
-
-        x, y = XY[j, :, 0], XY[j, :, 1]
-        chief_x, chief_y = x[0], y[0]           # We added the Chief Ray first to the BatchTrace
-        cent_x, cent_y = np.mean(x), np.mean(y)
-
-        # Select what point will be used as Reference for the FWHM
-        if reference == "Centroid":
-            ref_x, ref_y = cent_x, cent_y
-        elif reference == "ChiefRay":
-            ref_x, ref_y = chief_x, chief_y
-        else:
-            raise ValueError("reference should be 'ChiefRay' or 'Centroid'")
-
-        # Add the Reference Point to the Focal Plane Raytrace results
-        foc_xy[j, :] = [ref_x, ref_y]
-
-        # # Calculate the contours
-        # x, y = XY[j, :, 0], XY[j, :, 1]
-        #
-        # mx, my = np.mean(x), np.mean(y)
-        # dx, dy = 1000*(x - mx), 1000*(y - my)       # in microns
-        # ax = axes[j]
-        # ax.scatter(dx, dy, s=3, color=color)
-        # # ax.set_xlabel(r'X [mm]')
-        # # ax.set_ylabel(r'X [mm]')
-        # ax.set_xlim([-25, 25])
-        # ax.set_ylim([-25, 25])
-        # ax.set_xticklabels([])
-        # ax.set_yticklabels([])
-        # ax.set_aspect('equal')
-        # ax.xaxis.set_visible('False')
-        # ax.yaxis.set_visible('False')
-
-        return [XY, obj_xy, foc_xy]
-
-    def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
-                        configuration_idx=None, surface=None, N_rays=40, reference='ChiefRay'):
-        """
-
-        """
-
-        # We need to know how many rays are inside the pupil
-        px = np.linspace(-1, 1, N_rays, endpoint=True)
-        pxx, pyy = np.meshgrid(px, px)
-        pupil_mask = np.sqrt(pxx ** 2 + pyy ** 2) <= 1.0
-        px, py = pxx[pupil_mask], pyy[pupil_mask]
-        # How many rays are actually inside the pupil aperture?
-        N_rays_inside = px.shape[0]
-
-        # We want the result to produce as output: the RMS WFE array, and the RayTrace at both Object and Focal plane
-        results_names = ['XY', 'OBJ_XY', 'FOC_XY']
-        # we need to give the shapes of each array to self.run_analysis
-        results_shapes = [(1, N_rays_inside + 1, 2), (1, 2), (1, 2)]
-
-        # read the file options
-        file_list, settings = create_zemax_file_list(which_system=files_opt['which_system'], AO_modes=files_opt['AO_modes'],
-                                           scales=files_opt['scales'], IFUs=files_opt['IFUs'], grating=files_opt['grating'])
-
-        for zemax_file in file_list:
-
-            list_results = self.run_analysis(analysis_function=self.analysis_functions_spots,
-                                             files_dir=files_dir,zemax_file=zemax_file, results_path=results_path,
-                                             results_shapes=results_shapes, results_names=results_names,
-                                             wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
-                                             surface=surface, N_rays=N_rays, reference=reference)
-
-            return list_results
-
-
-
-
 
 class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
     """
@@ -1915,7 +1816,8 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
     and estimating the diameter of the 50% contour line
     """
 
-    def analysis_function_geofwhm_psf(self, system, wave_idx, config, surface, N_rays, reference='ChiefRay'):
+    def analysis_function_geofwhm_psf(self, system, wave_idx, config, surface, N_rays, N_points,
+                                      PSF_window, reference='Centroid'):
 
 
         # print("Config: ", config)
@@ -1957,11 +1859,12 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
         FWHM = np.zeros((N_fields, 3))          # [mean_radius, m_radiusX, m_radiusY]
         obj_xy = np.zeros((N_fields, 2))        # (fx, fy) coordinates
         foc_xy = np.empty((N_fields, 2))        # raytrace results of the Centroid
+        PSF_cube = np.empty((N_fields, N_points, N_points))
 
         if config == 1:
             print("\nTracing %d rays to calculate FWHM PSF" % (N_rays_inside))
 
-        fig, axes = plt.subplots(1, N_fields)
+        # fig, axes = plt.subplots(1, N_fields)
 
         # Loop over each Field computing the Spot Diagram
         for j in range(N_fields):
@@ -1996,6 +1899,7 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
 
             # Calculate the contours
             x, y = XY[j, :, 0], XY[j, :, 1]
+            xy = XY[j]
 
             chief_x, chief_y = x[0], y[0]           # We added the Chief Ray first to the BatchTrace
             cent_x, cent_y = np.mean(x), np.mean(y)
@@ -2011,119 +1915,77 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
             # Add the Reference Point to the Focal Plane Raytrace results
             foc_xy[j, :] = [ref_x, ref_y]
 
-            # For the FWHM we use Seaborn to calculate a Kernel Density Estimate
-            # Given the Raytrace positions (x, y) for a cloud of Rays, it calculates
-            # the density contours.
-            N_levels = 20
+            # KDE with scikit
+            std_x, std_y = np.std(x), np.std(y)
+            std = max(std_x, std_y)
+            bandwidth = min(std_x, std_y)
 
-            # ax = axes[j]                # select the subplot axis to place the results
-            # sns.set_style("white")
-            # # contour = sns.kdeplot(x, y, n_levels=N_levels, ax=ax)       # Kernel Density Estimate with Seaborn
-            # contour = sns.kdeplot(x, y, n_levels=N_levels, ax=ax)       # Kernel Density Estimate with Seaborn
-            # half_contour = contour.collections[N_levels//2]             # Select the 50% level contour
-            # path = half_contour.get_paths()[0]                          # Select the path for that contour
-            # vertices = path.vertices                                    # Select vertices of that contour
-            # N_segments = vertices.shape[0]
-            #
-            # ax.scatter(x, y, color='blue', s=1)                         # Plot the cloud of Rays
-            # # ax.scatter(ref_x, ref_y, label=reference, color='green')  # Plot the reference point
-            # ax.scatter(vertices[:, 0], vertices[:, 1], color='red', s=5)
-            # if N_segments < 20:     # Warn me that the contour has too few vertices
-            #     print("Warning: Too few points (%d) along the 50 percent contour" % N_segments)
-            #     print("Results may be innacurate")
-            #
-            #     # new contour
-            #     next_contour = contour.collections[N_levels // 2 - 1]
-            #     next_path = next_contour.get_paths()[0]
-            #     next_vertices = next_path.vertices
-            #     N_next = next_vertices.shape[0]
-            #     print("Next Contour: %d" % N_next)
+            kde = KernelDensity(kernel='gaussian', bandwidth=0.75*bandwidth).fit(xy)
 
-                # Old approach that sometimes fails because it uses very few point in the contour
-            # half_segments = half_contour.get_segments()[0]
-            # half_positions = half_contour.get_positions()
+            # define a grid to compute the PSF
+            # xmin, xmax = cent_x - 3 * std, cent_x + 3 * std
+            # ymin, ymax = cent_y - 3 * std, cent_y + 3 * std
+            xmin, xmax = cent_x - PSF_window/2/1000, cent_x + PSF_window/2/1000
+            ymin, ymax = cent_y - PSF_window/2/1000, cent_y + PSF_window/2/1000
+            x_grid = np.linspace(xmin, xmax, N_points)
+            y_grid = np.linspace(ymin, ymax, N_points)
+            xx_grid, yy_grid = np.meshgrid(x_grid, y_grid)
+            xy_grid = np.vstack([xx_grid.ravel(), yy_grid.ravel()]).T
+            # print(xy_grid.shape)
+            log_scores = kde.score_samples(xy_grid)
 
-            # # Once we have the points that define the 50% contour we can use that to
-            # # calculate the FWHM
-            # radii = np.sqrt((vertices[:, 0] - ref_x) ** 2 + (vertices[:, 1] - ref_y) ** 2)
-            # mean_fwhm = 2 * 1e3 * np.mean(radii)            # Twice the mean distance between contour and ref. point
-            #
-            # # Marginal distributions - Across and Along the slice
+            psf = np.exp(log_scores)
+            psf /= np.max(psf)
+            psf = psf.reshape(xx_grid.shape)
+            PSF_cube[j] = psf
 
-            sns.set_style("white")
-            joint = sns.jointplot(x=x, y=y, kind='kde')
+            # ax = axes[j]
+            # img = ax.imshow(psf, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
+            # # ax.scatter(x, y, s=3, color='black', alpha=0.5)
+            # plt.colorbar(img, ax=ax, orientation='horizontal')
+            # ax.set_xlim([xmin, xmax])
+            # ax.set_ylim([ymin, ymax])
 
-            def calculate_marginal_fwhm(ax_marg, mode='X'):
-                # We need the axis of the plot where
-                # the marginal distribution lives
-
-                path_marg = ax_marg.collections[0].get_paths()[0]
-                vert_marg = path_marg.vertices
-                N_vert = vert_marg.shape[0]
-                # the plot is a closed shape so half of it is just a path along y=0
-                if mode == 'X':
-                    xdata = vert_marg[N_vert // 2:, 0]
-                    ydata = vert_marg[N_vert // 2:, 1]
-                if mode == 'Y':  # In Y mode the data is rotated 90deg so X data becomes Y
-                    xdata = vert_marg[N_vert // 2:, 1]
-                    ydata = vert_marg[N_vert // 2:, 0]
-
-                peak = np.max(ydata)
-                # as the sampling is constant we will count how many points are
-                # above 50% of the peak, and how many below
-                # and scale that ratio above/below by the range of the plot
-                deltaX = np.max(xdata) - np.min(xdata)  # the range of our data
-                above = np.argwhere(ydata >= 0.5 * peak).shape[0]
-                below = np.argwhere(ydata < 0.5 * peak).shape[0]
-                total = above + below
-                # Above / Total = FWHM / Range
-                fwhm = above / total * deltaX
-
-                return fwhm
-
-            fwhm_x = 1e3 * calculate_marginal_fwhm(joint.ax_marg_x, mode='X')
-            fwhm_y = 1e3 * calculate_marginal_fwhm(joint.ax_marg_y, mode='Y')
-
-            # print("%.1f, %.1f, %.1f" % (mean_fwhm, fwhm_x, fwhm_y))
-
-            # # And the projected sizes both ALONG (X) and ACROSS (Y) the slice
-            # rx = np.max(vertices[:, 0]) - np.min(vertices[:, 0])        # Max(x) - Min(x)
-            # ry = np.max(vertices[:, 1]) - np.min(vertices[:, 1])        # Max(y) - Min(y)
-            # fwhm_x, fwhm_y = 1e3 * np.mean(rx), 1e3 * np.mean(ry)
-
-            # rx = np.sqrt((vertices[:, 0] - ref_x) ** 2)
-            # ry = np.sqrt((vertices[:, 1] - ref_y) ** 2)
-
-            FWHM[j, :] = [-99, fwhm_x, fwhm_y]        # Store the results
-            # ax.set_title(r"Field %d | FWHM=%.1f, Fx$=%.1f, Fy=%.1f \mu$m" % (j+1, mean_fwhm, fwhm_x, fwhm_y))
-            # ax.set_aspect('equal')
-            # plt.legend()
-
-            plt.close(joint.fig)
+            # FWHM[j, :] = [-99, fwhm_x, fwhm_y]        # Store the results
 
         # plt.show()
         #
         # plt.show(block=False)
         # plt.pause(0.05)
-        plt.close(fig)
+        # plt.close(fig)
 
         # # Remember to remove the extra fields otherwise they pile up
         # sysField.RemoveField(N_fields)
         # sysField.RemoveField(N_fields - 1)
 
-        return [FWHM, obj_xy, foc_xy]
+        return [FWHM, PSF_cube, obj_xy, foc_xy]
 
 
     def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
-                        configuration_idx=None, surface=None, N_rays=40, plots=False):
+                        configuration_idx=None, surface=None, N_rays=40, N_points=100, PSF_window=50, plots=False):
         """
 
         """
 
         # We want the result to produce as output: the RMS WFE array, and the RayTrace at both Object and Focal plane
-        results_names = ['GEO_FWHM', 'OBJ_XY', 'FOC_XY']
+        results_names = ['GEO_FWHM', 'PSF_CUBE', 'OBJ_XY', 'FOC_XY']
         # we need to give the shapes of each array to self.run_analysis
-        results_shapes = [(3, 3), (3, 2), (3, 2)]
+        results_shapes = [(3, 3), (3, N_points, N_points), (3, 2), (3, 2)]
+
+        # We need to know how many rays are inside the pupil
+        px = np.linspace(-1, 1, N_rays, endpoint=True)
+        pxx, pyy = np.meshgrid(px, px)
+        pupil_mask = np.sqrt(pxx ** 2 + pyy ** 2) <= 1.0
+        px, py = pxx[pupil_mask], pyy[pupil_mask]
+        # How many rays are actually inside the pupil aperture?
+        N_rays_inside = px.shape[0]
+
+        metadata = {}
+        metadata['N_rays Pupil'] = N_rays_inside
+        metadata['Configurations'] = 'All' if configuration_idx is None else configuration_idx
+        metadata['Wavelengths'] = 'All' if wavelength_idx is None else wavelength_idx
+        metadata['N_points PSF'] = N_points
+        metadata['PSF window [microns]'] = PSF_window
 
         # read the file options
         file_list, sett_list = create_zemax_file_list(which_system=files_opt['which_system'], AO_modes=files_opt['AO_modes'],
@@ -2136,10 +1998,16 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
                                              files_dir=files_dir,zemax_file=zemax_file, results_path=results_path,
                                              results_shapes=results_shapes, results_names=results_names,
                                              wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
-                                             surface=surface, N_rays=N_rays)
+                                             surface=surface, N_rays=N_rays, N_points=N_points, PSF_window=PSF_window)
 
 
-            geo_fwhm, obj_xy, foc_xy, wavelengths = list_results
+            geo_fwhm, psf_cube, obj_xy, foc_xy, wavelengths = list_results
+
+            settings['surface'] = 'IMG' if surface is None else surface
+
+            file_name = zemax_file.split('.')[0]
+            self.save_hdf5(analysis_name='FWHM_PSF', analysis_metadata=metadata, list_results=list_results,
+                           results_names=results_names, file_name=file_name, file_settings=settings, results_dir=results_path)
 
             # N_waves = geo_fwhm.shape[0]
             #
@@ -2625,7 +2493,7 @@ class RMS_WFE_Analysis(AnalysisGeneric):
             # Post-Processing the results
             file_name = zemax_file.split('.')[0]
             results_dir = os.path.join(results_path, file_name)
-            settings['surface'] = surface
+            settings['surface'] = 'IMG' if surface is None else surface
 
             self.save_hdf5(analysis_name='RMS_WFE', analysis_metadata=metadata, list_results=list_results, results_names=results_names,
                            file_name=file_name, file_settings=settings, results_dir=results_path)
@@ -2641,20 +2509,7 @@ class RMS_WFE_Analysis(AnalysisGeneric):
         return results
 
 
-    def flip_rms(self, rms_datacube):
-        """
-        Loop over the Wavelengths and apply "from_ifu_config_to_slices" to
-        reorder the results into proper Slice # rather than Zemax Configuration #
-        :param rms_datacube: an array of size [spaxels_per_slice, N_slices, N_waves]
-        :return: an array of size [2 * spaxels_per_slice, N_slices // 2, N_waves]
-        """
 
-        N_waves, N_slices, spaxels_per_slice = rms_datacube.shape
-        new_rms = np.empty((N_waves, N_slices // 2, spaxels_per_slice * 2))
-        for i in range(N_waves):
-            _array = rms_datacube[i]
-            new_rms[i] = from_ifu_config_to_slices(_array.T).T
-        return new_rms
 
     def plot_RMS_WFE_maps(self, file_name, result_path, rms_ifu, wavelengths, colormap='jet'):
 
@@ -2713,249 +2568,99 @@ if __name__ == """__main__""":
 
     plt.show()
 
-    # # fwhm is shape [N_waves, N_configs, N_fields, (meanR, XR, YR)]
-    # j_wave = 0
-    # x, y = foc_xy[j_wave, :, :, 0].flatten(), foc_xy[j_wave, :, :, 1].flatten()
-    # triang = tri.Triangulation(x, y)
-    #
-    # fig1, axes = plt.subplots(1, 3)
-    # # ax1.set_aspect('equal')
-    # titles = [r'FWHM [$\mu$m]', r'FWHM_X [$\mu$m]', r'FWHM_Y [$\mu$m]']
-    # for k in range(3):
-    #     ax = axes[k]
-    #     tpc = ax.tripcolor(triang, fwhm[j_wave, :, :, k].flatten(), shading='flat', cmap='jet')
-    #     # tpc.set_clim(vmin=np.min(fwhm[j_wave]), vmax=np.max(fwhm[j_wave]))
-    #     ax.scatter(x, y, color='black', s=2)
-    #     plt.colorbar(tpc, orientation='horizontal', ax=ax)
-    #     ax.set_xlabel(r'X [mm]')
-    #     ax.set_ylabel(r'Y [mm]')
-    #     ax.set_title(titles[k])
-    # plt.show()
+    """ Old FWHM bits with Seaborn Kernel Density Estimation """
 
-    plt.figure()
-
-
-
-    # xy = np.random.normal(0, scale=1, size=(1000, 2))
-    # cent_x, cent_y = np.mean(xy[:, 0]), np.mean(xy[:, 1])
+    # # For the FWHM we use Seaborn to calculate a Kernel Density Estimate
+    # # Given the Raytrace positions (x, y) for a cloud of Rays, it calculates
+    # # the density contours.
+    # N_levels = 20
     #
-    # fig, ax1 = plt.subplots(1, 1)
-    # sns.set_style("white")
-    # contour = sns.kdeplot(xy[:, 0], xy[:, 1], n_levels=10, ax=ax1, cbar=True)
-    # half_contour = contour.collections[5]
-    # half_segments = half_contour.get_segments()[0]
-    # ax1.scatter(cent_x, cent_y)
-    # ax1.scatter(half_segments[:, 0], half_segments[:, 1], color='red', s=5)
-    # plt.show()
-    #
-    # radii = np.sqrt((half_segments[:, 0] - cent_x)**2 + (half_segments[:, 1] - cent_y)**2)
-    # mean_radius = np.mean(radii)
-
-
-
-
-    # analysis = EnsquaredEnergyCustomAnalysis(zosapi=psa)
-    # img_plane = 30
-    # options = {'which_system': 'IFS', 'AO_modes': [], 'scales': ['60x30'], 'IFUs': ['AB'],
-    #            'grating': ['IZJ']}
-    # list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options, results_path=results_path,
-    #                                         wavelength_idx=None, configuration_idx=[1], surface=None,
-    #                                         scale="60x30", focal_plane="SPEC", N_rays=30)
-    #
-    # ensq_ener, obj_xy, foc_xy, wavelengths = list_results
-
-    # x, y = foc_xy[:, :, :, 0].flatten(), foc_xy[:, :, :, 1].flatten()
-    # z = ensq_ener.flatten()
-    # triang = tri.Triangulation(x, y)
-    # interp_lin = tri.LinearTriInterpolator(triang, z)
-
-    # ngridx = 100
-    # xi = np.linspace(x.min(), x.max(), ngridx)
-    # yi = np.linspace(y.min(), y.max(), ngridx)
-    # xi, yi = np.meshgrid(xi, yi)
-    # # zi = mlab.griddata(x, y, z, xi, yi, interp='linear')
-    # zi_lin = interp_lin(xi, yi)
-    #
-    # levels = np.arange(0.75, 1., 0.025)
-    # img = plt.tricontourf(triang, z, cmap='Reds')
-    # # plt.triplot(triang, lw=0.5, color='white')
-    # plt.clim(vmin=0.90, vmax=1.0)
-    # plt.scatter(x, y, s=2, color='white')
-    # plt.xlim([-1.05 * x.min(), 1.05 * x.min()])
-    # plt.ylim([-1.05 * y.min(), 1.05 * y.min()])
-    # plt.colorbar(img, orientation='horizontal')
-    #
-    # plt.contourf(xi, yi, zi_lin, cmap='Blues')
-    # # plt.plot(xi, yi, 'k-', lw=0.5, alpha=0.5)
-    # # plt.plot(xi.T, yi.T, 'k-', lw=0.5, alpha=0.5)
-    # plt.scatter(x, y, s=2, color='white')
-    # plt.title("Linear interpolation")
-    #
-    #
-    # plt.figure()
-    #
-    # plt.triplot(triang)
-    #
-    # plt.show()
-    #
-    #
-    # # plt.tricontour(x, y, z, 10, linewidths=0.5, colors='k')
-    # plt.tricontourf(x, y, z, 25,
-    #                 cmap='Blues')
-    # plt.clim(vmin=0.5, vmax=np.max(z))
-    # plt.plot(x, y, 'ko', ms=2)
-    # plt.xlabel(r'X [mm]')
-    # plt.ylabel(r'Y [mm]')
-    # # fig_name = file_name + '_SURF_' + surface_number + '_ENSQ_ENER_WAVE%d' % (wavelength_idx[k])
-    # # plt.title(fig_name)
-    # plt.colorbar(orientation='horizontal')
-    # plt.xlim([-1.05 * x.min(), 1.05 * x.min()])
-    #
-    #
-    # for k in range(wavelengths.shape[0]):
-    #     x, y = foc_xy[:, :, :, 0].flatten(), foc_xy[:, :, :, 1].flatten()
-    #     z = ensq_ener.flatten()
-    #
-    #     ngridx = 20
-    #     xi = np.linspace(x.min(), x.max(), ngridx)
-    #     yi = np.linspace(y.min(), y.max(), ngridx)
-    #     zi = mlab.griddata(x, y, z, xi, yi, interp='linear')
-    #
-    #     plt.figure()
-    #     # triang = tri.Triangulation(x, y)
-    #     # plt.tricontour(x, y, z, 10, linewidths=0.5, colors='k')
-    #     img = plt.tricontourf(x, y, z, cmap='Blues')
-    #     img.set_clim(vmin=0.5, vmax=1.0)
-    #     # plt.scatter(x, y, s=2, color='white')
-    #     plt.xlabel(r'X [mm]')
-    #     plt.ylabel(r'Y [mm]')
-    #     # fig_name = file_name + '_SURF_' + surface_number + '_ENSQ_ENER_WAVE%d' % (wavelength_idx[k])
-    #     # plt.title(fig_name)
-    #     plt.colorbar(img, orientation='horizontal')
-    #     plt.xlim([-1.05 * x.min(), 1.05 * x.min()])
-    #     plt.ylim([-1.05 * y.min(), 1.05 * y.min()])
-
-    """ Ensquared Energy 60x30 scale"""
-    # img_plane = 30
-    # options = {'which_system': 'IFS', 'AO_modes': [], 'scales': ['60x30'], 'IFUs': ['AB'],
-    #            'grating': ['VIS', 'IZJ', 'HK', 'IZ', 'J', 'H', 'K', 'Z_HIGH', 'H_HIGH', 'K_LONG', 'K_SHORT']}
-    #
-    # analysis = EnsquaredEnergyAnalysis(zosapi=psa)
-    # results = analysis.loop_over_files(files_dir=files_path, files_opt=options, results_path=results_path,
-    #                                    wavelength_idx=[1], configuration_idx=None, surface=img_plane,
-    #                                    distance=10.0, sampling=4)
-    # ensq_ener, obj_xy, foc_xy, waves = results
-
-    # for k in range(1):
-    #     x, y = obj_xy[k, :, :, 0].flatten(), obj_xy[k, :, :, 1].flatten()
-    #     z = ensq_ener[k].flatten()
-    #
-    #     ngridx = 100
-    #     xi = np.linspace(x.min(), x.max(), ngridx)
-    #     yi = np.linspace(y.min(), y.max(), ngridx)
-    #     zi = mlab.griddata(x, y, z, xi, yi, interp='linear')
-    #
-    #     plt.figure()
-    #     # triang = tri.Triangulation(x, y)
-    #     # plt.tricontour(x, y, z, 10, linewidths=0.5, colors='k')
-    #     plt.tricontourf(x, y, z, 25,
-    #                     cmap='Blues')
-    #     plt.clim(vmin=np.min(z), vmax=1.0)
-    #     plt.plot(x, y, 'ko', ms=2)
-    #     plt.xlabel(r'X [mm]')
-    #     plt.ylabel(r'Y [mm]')
-    #     # fig_name = file_name + '_SURF_' + surface_number + '_ENSQ_ENER_WAVE%d' % (wavelength_idx[k])
-    #     # plt.title(fig_name)
-    #     plt.colorbar(orientation='horizontal')
-    #     plt.xlim([-1.05 * x.min(), 1.05 * x.min()])
-    #
-    #     plt.axes().set_aspect('equal')
-    #     if os.path.isfile(os.path.join(results_dir, fig_name)):
-    #         os.remove(os.path.join(results_dir, fig_name))
-    #     plt.savefig(os.path.join(results_dir, fig_name))
-    #     plt.show(block=False)
-    #     plt.pause(0.5)
-    #     plt.close()
-
-
-
-
-
-
+    # # ax = axes[j]                # select the subplot axis to place the results
+    # # sns.set_style("white")
+    # # # contour = sns.kdeplot(x, y, n_levels=N_levels, ax=ax)       # Kernel Density Estimate with Seaborn
+    # # contour = sns.kdeplot(x, y, n_levels=N_levels, ax=ax)       # Kernel Density Estimate with Seaborn
+    # # half_contour = contour.collections[N_levels//2]             # Select the 50% level contour
+    # # path = half_contour.get_paths()[0]                          # Select the path for that contour
+    # # vertices = path.vertices                                    # Select vertices of that contour
+    # # N_segments = vertices.shape[0]
     # #
-    # plt.xlim(-2, 2)
-    # plt.ylim(-2, 2)
-    # plt.title('tricontour (%d points)' % npts)
+    # # ax.scatter(x, y, color='blue', s=1)                         # Plot the cloud of Rays
+    # # # ax.scatter(ref_x, ref_y, label=reference, color='green')  # Plot the reference point
+    # # ax.scatter(vertices[:, 0], vertices[:, 1], color='red', s=5)
+    # # if N_segments < 20:     # Warn me that the contour has too few vertices
+    # #     print("Warning: Too few points (%d) along the 50 percent contour" % N_segments)
+    # #     print("Results may be innacurate")
+    # #
+    # #     # new contour
+    # #     next_contour = contour.collections[N_levels // 2 - 1]
+    # #     next_path = next_contour.get_paths()[0]
+    # #     next_vertices = next_path.vertices
+    # #     N_next = next_vertices.shape[0]
+    # #     print("Next Contour: %d" % N_next)
     #
-    # dmin = np.min(rms_wfe)
-    # dmax = np.max(rms_wfe)
-    # smin = 2
-    # smax = 12
-    # for i in range(76):
-    #     for j in range(102):
-    #         data = rms_wfe[0, i, j]
+    # # Old approach that sometimes fails because it uses very few point in the contour
+    # # half_segments = half_contour.get_segments()[0]
+    # # half_positions = half_contour.get_positions()
     #
-    #         size = smin + (data - dmin)/(dmax - dmin) * (smax - smin)
-    #         plt.scatter(x, y, s=size, color='blue')
-
-
-
-
-
-
-
-    # """ (1) Example of Spot Diagrams"""
-    # # This generates Spot Diagrams for a set of Fields for each Wavelength and Configuration specified
-    # # XY is an array of size [N_waves, N_configs, N_fields, N_rays^2, 2]
-    # spot_options = {'which_system': 'IFS', 'AO_modes': [], 'scales': ['4x4'], 'IFUs': ['AB'],
-    #                     'grating': ['VIS', 'IZJ', 'HK', 'IZ', 'J', 'H', 'K', 'Z_HIGH', 'H_HIGH', 'K_LONG', 'K_SHORT']}
-    # analysis = SpotDiagramAnalysis(zosapi=psa)
-    # analysis.loop_over_files(files_dir=files_path, files_opt=spot_options, results_path=results_path,
-    #                          field=[1, 2, 3], wavelength_idx=[1, 3, 5, 7], configuration_idx=[1, 2],
-    #                          N_rays=30, plot_mode='Fields')
+    # # # Once we have the points that define the 50% contour we can use that to
+    # # # calculate the FWHM
+    # # radii = np.sqrt((vertices[:, 0] - ref_x) ** 2 + (vertices[:, 1] - ref_y) ** 2)
+    # # mean_fwhm = 2 * 1e3 * np.mean(radii)            # Twice the mean distance between contour and ref. point
+    # #
+    # # # Marginal distributions - Across and Along the slice
     #
-    # """ (2) Example of RMS Spot """
-    # # Calculate the RMS Spot for several Wavelengths, Configurations and Fields
-    # # spots is an array of size [N_waves, N_confis, N_fields]
-    # rms_spot_options = {'which_system': 'IFS', 'AO_modes': [], 'scales': ['20x20'], 'IFUs': ['AB'],
-    #                     'grating': ['IZJ', 'IZ', 'Z_HIGH', 'J', 'HK', 'H', 'H_HIGH', 'K',  'K_SHORT', 'K_LONG' ]}
-    # analysis = RMSSpotAnalysis(zosapi=psa)
-    # spots = analysis.loop_over_files(files_dir=files_path, files_opt=rms_spot_options, results_path=results_path,
-    #                                  field=[1, 2, 3], wavelength_idx=None, configuration_idx=[1, 2],
-    #                                  reference='Centroid', mode='RMS', ray_density=6, save_txt=False)
-
-    # plt.show()
-
-    """ (3) Example of RMS Wavefront """
-
-    # rms_wfe_options = {'which_system': 'IFS', 'AO_modes': [], 'scales': ['4x4'], 'IFUs': ['AB'],
-    #                     'grating': ['VIS', 'IZJ', 'HK', 'IZ', 'J', 'H', 'K', 'Z_HIGH', 'H_HIGH', 'K_LONG', 'K_SHORT']}
-    # analysis = RMS_WFE_Analysis(zosapi=psa)
-    # analysis.loop_over_files(files_dir=files_path, files_opt=rms_wfe_options, results_path=results_path,
-    #                          wavelength_idx=None, configuration_idx=None, surface=None, spaxels_per_slice=51, rings=4)
-
-    # """ (4) FPRS """
-    # fprs_options = {'which_system': 'HARMONI', 'AO_modes': ['NOAO'], 'scales': ['4x4'], 'IFUs': ['AB'],
-    #                 'grating': ['VIS', 'IZJ', 'HK', 'IZ', 'J', 'H', 'K', 'Z_HIGH', 'H_HIGH', 'K_LONG', 'K_SHORT']}
-    # fprs_img_plane = 63
-    # analysis = RMS_WFE_Analysis(zosapi=psa)
-    # analysis.loop_over_files(files_dir=files_path, files_opt=fprs_options, results_path=results_path,
-    #                          wavelength_idx=[1, 2], configuration_idx=None, surface=fprs_img_plane,
-    #                          spaxels_per_slice=51, rings=4)
-
-    # list_scales = ['4x4', '10x10', '20x20', '60x30']
-    # list_surfaces = [63, 60, 60]
-    # analysis = RMS_WFE_Analysis(zosapi=psa)
-    # for scale, surface in zip(list_scales, list_surfaces):
-    #     options = {'which_system': 'HARMONI', 'AO_modes': ['NOAO'], 'scales': [scale], 'IFUs': ['AB'],
-    #                'grating': ['VIS', 'IZJ', 'HK', 'IZ', 'J', 'H', 'K', 'Z_HIGH', 'H_HIGH', 'K_LONG', 'K_SHORT']}
+    # sns.set_style("white")
+    # joint = sns.jointplot(x=x, y=y, kind='kde')
     #
-    #     analysis.loop_over_files(files_dir=files_path, files_opt=options, results_path=results_path,
-    #                              wavelength_idx=[1, 2], configuration_idx=None, surface=surface,
-    #                              spaxels_per_slice=51, rings=4)
-
-
-
+    #
+    # def calculate_marginal_fwhm(ax_marg, mode='X'):
+    #     # We need the axis of the plot where
+    #     # the marginal distribution lives
+    #
+    #     path_marg = ax_marg.collections[0].get_paths()[0]
+    #     vert_marg = path_marg.vertices
+    #     N_vert = vert_marg.shape[0]
+    #     # the plot is a closed shape so half of it is just a path along y=0
+    #     if mode == 'X':
+    #         xdata = vert_marg[N_vert // 2:, 0]
+    #         ydata = vert_marg[N_vert // 2:, 1]
+    #     if mode == 'Y':  # In Y mode the data is rotated 90deg so X data becomes Y
+    #         xdata = vert_marg[N_vert // 2:, 1]
+    #         ydata = vert_marg[N_vert // 2:, 0]
+    #
+    #     peak = np.max(ydata)
+    #     # as the sampling is constant we will count how many points are
+    #     # above 50% of the peak, and how many below
+    #     # and scale that ratio above/below by the range of the plot
+    #     deltaX = np.max(xdata) - np.min(xdata)  # the range of our data
+    #     above = np.argwhere(ydata >= 0.5 * peak).shape[0]
+    #     below = np.argwhere(ydata < 0.5 * peak).shape[0]
+    #     total = above + below
+    #     # Above / Total = FWHM / Range
+    #     fwhm = above / total * deltaX
+    #
+    #     return fwhm
+    #
+    #
+    # fwhm_x = 1e3 * calculate_marginal_fwhm(joint.ax_marg_x, mode='X')
+    # fwhm_y = 1e3 * calculate_marginal_fwhm(joint.ax_marg_y, mode='Y')
+    #
+    # # print("%.1f, %.1f, %.1f" % (mean_fwhm, fwhm_x, fwhm_y))
+    #
+    # # # And the projected sizes both ALONG (X) and ACROSS (Y) the slice
+    # # rx = np.max(vertices[:, 0]) - np.min(vertices[:, 0])        # Max(x) - Min(x)
+    # # ry = np.max(vertices[:, 1]) - np.min(vertices[:, 1])        # Max(y) - Min(y)
+    # # fwhm_x, fwhm_y = 1e3 * np.mean(rx), 1e3 * np.mean(ry)
+    #
+    # # rx = np.sqrt((vertices[:, 0] - ref_x) ** 2)
+    # # ry = np.sqrt((vertices[:, 1] - ref_y) ** 2)
+    #
+    # FWHM[j, :] = [-99, fwhm_x, fwhm_y]  # Store the results
+    # # ax.set_title(r"Field %d | FWHM=%.1f, Fx$=%.1f, Fy=%.1f \mu$m" % (j+1, mean_fwhm, fwhm_x, fwhm_y))
+    # # ax.set_aspect('equal')
+    # # plt.legend()
+    #
+    # plt.close(joint.fig)
 
     del psa
     psa = None
