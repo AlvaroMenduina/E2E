@@ -1640,7 +1640,7 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
     """
 
     @staticmethod
-    def analysis_function_ensquared_energy(system, wave_idx, config, surface, distance, sampling):
+    def analysis_function_ensquared_energy(system, wave_idx, config, slicer_surface, detector_surface, N_rays):
 
         # Set Current Configuration
         system.MCE.SetCurrentConfiguration(config)
@@ -1657,84 +1657,70 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
         r_max = np.max([np.sqrt(sysField.GetField(i).X ** 2 +
                                 sysField.GetField(i).Y ** 2) for i in np.arange(1, N_fields + 1)])
 
-        fy_mean = np.mean([sysField.GetField(i).Y for i in np.arange(1, N_fields + 1)])
-        fx_mean = 1/2 * np.sum([sysField.GetField(i).X for i in np.arange(1, N_fields + 1)])
+        # Use the Field Point at the centre of the Slice
+        fx, fy = sysField.GetField(2).X, sysField.GetField(2).Y
+        hx, hy = fx / r_max, fy / r_max  # Normalized field coordinates (hx, hy)
+        obj_xy = np.array([fx, fy])
 
-        ## Add some extra field to get a better sampling
-        sysField.AddField(fx_mean, fy_mean, 1)
-        sysField.AddField(fx_mean / 3.0, fy_mean, 1)
-        N_fields = sysField.NumberOfFields
-        # new_field = sysField.GetField(N_fields)
-        # print("%.3f, %.3f" % (new_field.X, new_field.Y))
-        # new_field = sysField.GetField(N_fields-1)
-        # print("%.3f, %.3f" % (new_field.X, new_field.Y))
-        # print(N_fields)
+        def define_pupil_sampling(r_obsc, N_rays, mode='random'):
 
-        # Run the RayTrace for each Field Point
+            if mode == 'random':
+                r = np.random.uniform(low=r_obsc, high=1.0, size=N_rays)
+                theta = np.random.uniform(low=0.0, high=2*np.pi, size=N_rays)
+                px, py = r * np.cos(theta), r * np.sin(theta)
+
+            return px, py
+
+        slicer_xy = np.empty((N_rays, 2))
+        detector_xy = np.empty((N_rays, 2))
+        px, py = define_pupil_sampling(r_obsc=0.5, N_rays=N_rays, mode='random')
+
+        if config == 1:
+            print("\nTracing %d rays to calculate Ensquared Energy" % (N_rays))
+            fig, ax = plt.subplots(1, 1)
+            ax.scatter(px, py, s=3, color='black')
+            ax.set_xlabel(r'P_x')
+            ax.set_ylabel(r'P_y')
+            ax.set_xlim([-1, 1])
+            ax.set_ylim([-1, 1])
+            ax.set_title(r'%s rays' % N_rays)
+
         raytrace = system.Tools.OpenBatchRayTrace()
-        normUnPolData = raytrace.CreateNormUnpol(N_fields, constants.RaysType_Real, surface)
-
-        obj_xy = np.zeros((N_fields, 2))        # (fx, fy) coordinates
-        foc_xy = np.empty((N_fields, 2))        # raytrace results
-        ensq_ener = np.empty(N_fields)
-
-        theMFE = system.MFE
-        # clear current merit function
-        nops = theMFE.NumberOfOperands
-        theMFE.RemoveOperandsAt(1, nops)
-        # build merit function
-        op = theMFE.GetOperandAt(1)
-        op.ChangeType(constants.MeritOperandType_CONF)
-        op.GetOperandCell(constants.MeritColumn_Param1).Value = config
-
-        for i in range(N_fields):       # Loop over the available Field Points
-
-            fx, fy = sysField.GetField(i + 1).X, sysField.GetField(i + 1).Y
-            hx, hy = fx / r_max, fy / r_max     # Normalized field coordinates (hx, hy)
-            obj_xy[i, :] = [fx, fy]
-
-            op = theMFE.AddOperand()
-            op.ChangeType(constants.MeritOperandType_GENF)
-            op.GetOperandCell(constants.MeritColumn_Param1).Value = sampling    # Pupil Sampling {1: 32x32, 2: 64x64 ...]
-            op.GetOperandCell(constants.MeritColumn_Param2).Value = wave_idx    # Wave
-            op.GetOperandCell(constants.MeritColumn_Param3).Value = i + 1       # Field
-            op.GetOperandCell(constants.MeritColumn_Param4).Value = distance    # Distance [microns]
-            op.GetOperandCell(constants.MeritColumn_Param5).Value = 4           # Type {4: Ensquared}
-            op.GetOperandCell(constants.MeritColumn_Param6).Value = 0           # Reference {0: Chief ray, 1: Centroid}
-            op.GetOperandCell(constants.MeritColumn_Weight).Value = 0
-
+        # remember to specify the surface to which you are tracing!
+        normUnPolData = raytrace.CreateNormUnpol(N_rays, constants.RaysType_Real, slicer_surface)
+        for (p_x, p_y) in zip(px, py):
             # Add the ray to the RayTrace
-            normUnPolData.AddRay(wave_idx, hx, hy, 0, 0, constants.OPDMode_None)
-
-        # update merit function
-        theMFE.CalculateMeritFunction()
-        for irow in range(2, theMFE.NumberOfOperands + 1):
-            if op.Type == constants.MeritOperandType_GENF:      # Sanity check that we are looking at the correct Type
-                op = theMFE.GetOperandAt(irow)
-                # print(op.Value)
-                ensq_ener[irow - 2] = op.Value
-        # print("_")
+            normUnPolData.AddRay(wave_idx, hx, hy, p_x, p_y, constants.OPDMode_None)
 
         # Run the RayTrace for the whole Slice
         CastTo(raytrace, 'ISystemTool').RunAndWaitForCompletion()
         normUnPolData.StartReadingResults()
-        for i in range(N_fields):
+        for i in range(N_rays):
             output = normUnPolData.ReadNextResult()
             if output[2] == 0 and output[3] == 0:
-                foc_xy[i, 0] = output[4]
-                foc_xy[i, 1] = output[5]
+                slicer_xy[i, 0] = output[4]
+                slicer_xy[i, 1] = output[5]
 
         normUnPolData.ClearData()
         CastTo(raytrace, 'ISystemTool').Close()
 
-        # Remove that extra Field we have added, otherwise they pile up
-        sysField.RemoveField(N_fields)
-        sysField.RemoveField(N_fields - 1)
+        fig, ax = plt.subplots(1, 1)
+        ax.scatter(slicer_xy[:, 0], slicer_xy[:, 1], s=3, color='black')
+        ax.set_xlabel(r'Slicer X [mm]')
+        ax.set_ylabel(r'Slicer Y [mm]')
+        # ax.set_xlim([-1, 1])
+        # ax.set_ylim([-1, 1])
+        ax.set_title(r'%s rays' % N_rays)
+        plt.show()
+
+
+        ensq_ener = 0.0
+
 
         return [ensq_ener, obj_xy, foc_xy]
 
     def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
-                        configuration_idx=None, surface=None, distance=1.0, sampling=4):
+                        configuration_idx=None, N_rays=500):
         """
         Function that loops over a given set of E2E model Zemax files, running the analysis
         defined by self.analysis_function_rms_wfe
@@ -1753,57 +1739,64 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
         # We want the result to produce as output: the RMS WFE array, and the RayTrace at both Object and Focal plane
         results_names = ['EE_WFE', 'OBJ_XY', 'FOC_XY']
         # we need to give the shapes of each array to self.run_analysis
-        results_shapes = [(5,), (5, 2), (5, 2)]
+        results_shapes = [(1,), (2,), (N_rays, 2)]
 
         # read the file options
-        file_list, settings = create_zemax_file_list(which_system=files_opt['which_system'], AO_modes=files_opt['AO_modes'],
+        file_list, file_settings = create_zemax_file_list(which_system=files_opt['which_system'], AO_modes=files_opt['AO_modes'],
                                            scales=files_opt['scales'], IFUs=files_opt['IFUs'], grating=files_opt['grating'])
 
-        for zemax_file in file_list:
+
+        for zemax_file, settings in zip(file_list, file_settings):
+
+            system = settings['system']
+            spaxel_scale = settings['scale']
+            ifu = settings['ifu']
+            slicer_surface = focal_planes[system][spaxel_scale][ifu]['IS']
+            detector_surface = focal_planes[system][spaxel_scale][ifu]['DET']
 
             list_results = self.run_analysis(analysis_function=self.analysis_function_ensquared_energy,
                                              files_dir=files_dir, zemax_file=zemax_file, results_path=results_path,
                                              results_shapes=results_shapes, results_names=results_names,
                                              wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
-                                             surface=surface, distance=distance, sampling=sampling)
+                                             slicer_surface=slicer_surface, detector_surface=detector_surface, N_rays=N_rays)
 
             ensq_ener, obj_xy, foc_xy, wavelengths = list_results
 
-            # Post-Processing the results
-            file_name = zemax_file.split('.')[0]
-            results_dir = os.path.join(results_path, file_name)
-            surface_number = str(surface) if surface is not None else '_IMG'
-
-            for k in range(1):
-                x, y = obj_xy[k, :, :, 0].flatten(), obj_xy[k, :, :, 1].flatten()
-                z = ensq_ener[k].flatten()
-
-                # ngridx = 100
-                # xi = np.linspace(x.min(), x.max(), ngridx)
-                # yi = np.linspace(y.min(), y.max(), ngridx)
-                # zi = mlab.griddata(x, y, z, xi, yi, interp='linear')
-
-                plt.figure()
-                # triang = tri.Triangulation(x, y)
-                # plt.tricontour(x, y, z, 10, linewidths=0.5, colors='k')
-                plt.tricontourf(x, y, z, 25,
-                                cmap='Blues')
-                plt.clim(vmin=np.min(z), vmax=np.max(z))
-                plt.plot(x, y, 'ko', ms=2)
-                plt.xlabel(r'X [mm]')
-                plt.ylabel(r'Y [mm]')
-                fig_name = file_name + '_SURF_' + surface_number + '_ENSQ_ENER_WAVE%d' % (wavelength_idx[k])
-                plt.title(fig_name)
-                plt.colorbar(orientation='horizontal')
-                plt.xlim([-1.05 * x.min(), 1.05 * x.min()])
-
-                plt.axes().set_aspect('equal')
-                if os.path.isfile(os.path.join(results_dir, fig_name)):
-                    os.remove(os.path.join(results_dir, fig_name))
-                plt.savefig(os.path.join(results_dir, fig_name))
-                plt.show(block=False)
-                plt.pause(0.5)
-                plt.close()
+            # # Post-Processing the results
+            # file_name = zemax_file.split('.')[0]
+            # results_dir = os.path.join(results_path, file_name)
+            # surface_number = str(surface) if surface is not None else '_IMG'
+            #
+            # for k in range(1):
+            #     x, y = obj_xy[k, :, :, 0].flatten(), obj_xy[k, :, :, 1].flatten()
+            #     z = ensq_ener[k].flatten()
+            #
+            #     # ngridx = 100
+            #     # xi = np.linspace(x.min(), x.max(), ngridx)
+            #     # yi = np.linspace(y.min(), y.max(), ngridx)
+            #     # zi = mlab.griddata(x, y, z, xi, yi, interp='linear')
+            #
+            #     plt.figure()
+            #     # triang = tri.Triangulation(x, y)
+            #     # plt.tricontour(x, y, z, 10, linewidths=0.5, colors='k')
+            #     plt.tricontourf(x, y, z, 25,
+            #                     cmap='Blues')
+            #     plt.clim(vmin=np.min(z), vmax=np.max(z))
+            #     plt.plot(x, y, 'ko', ms=2)
+            #     plt.xlabel(r'X [mm]')
+            #     plt.ylabel(r'Y [mm]')
+            #     fig_name = file_name + '_SURF_' + surface_number + '_ENSQ_ENER_WAVE%d' % (wavelength_idx[k])
+            #     plt.title(fig_name)
+            #     plt.colorbar(orientation='horizontal')
+            #     plt.xlim([-1.05 * x.min(), 1.05 * x.min()])
+            #
+            #     plt.axes().set_aspect('equal')
+            #     if os.path.isfile(os.path.join(results_dir, fig_name)):
+            #         os.remove(os.path.join(results_dir, fig_name))
+            #     plt.savefig(os.path.join(results_dir, fig_name))
+            #     plt.show(block=False)
+            #     plt.pause(0.5)
+            #     plt.close()
 
         return list_results
 
@@ -1864,7 +1857,7 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
         if config == 1:
             print("\nTracing %d rays to calculate FWHM PSF" % (N_rays_inside))
 
-        # fig, axes = plt.subplots(1, N_fields)
+        fig, axes = plt.subplots(1, N_fields)
 
         # Loop over each Field computing the Spot Diagram
         for j in range(N_fields):
@@ -1939,16 +1932,16 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
             psf = psf.reshape(xx_grid.shape)
             PSF_cube[j] = psf
 
-            # ax = axes[j]
-            # img = ax.imshow(psf, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
-            # # ax.scatter(x, y, s=3, color='black', alpha=0.5)
-            # plt.colorbar(img, ax=ax, orientation='horizontal')
-            # ax.set_xlim([xmin, xmax])
-            # ax.set_ylim([ymin, ymax])
+            ax = axes[j]
+            img = ax.imshow(psf, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
+            # ax.scatter(x, y, s=3, color='black', alpha=0.5)
+            plt.colorbar(img, ax=ax, orientation='horizontal')
+            ax.set_xlim([xmin, xmax])
+            ax.set_ylim([ymin, ymax])
 
             # FWHM[j, :] = [-99, fwhm_x, fwhm_y]        # Store the results
 
-        # plt.show()
+        plt.show()
         #
         # plt.show(block=False)
         # plt.pause(0.05)
