@@ -64,8 +64,8 @@ def stitch_ensquare_energy(zosapi, spaxel_scale, grating, N_rays, files_path, re
         os.remove(os.path.join(results_path, fig_name))
     fig.savefig(os.path.join(results_path, fig_name))
 
-    plt.show()
-
+    # plt.show()
+    return
 
 
 if __name__ == """__main__""":
@@ -79,12 +79,13 @@ if __name__ == """__main__""":
     files_path = os.path.abspath("D:\End to End Model\April_2020")
     results_path = os.path.abspath("D:\End to End Model\Results_April")
 
-    spaxel_scale = '10x10'
-    grating = 'H'
+    spaxel_scale = '60x30'
+    gratings = ['IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
     N_rays = 1000
 
-    stitch_ensquare_energy(zosapi=psa, spaxel_scale=spaxel_scale, grating=grating, N_rays=N_rays,
-                           files_path=files_path, results_path=results_path)
+    for grating in gratings:
+        stitch_ensquare_energy(zosapi=psa, spaxel_scale=spaxel_scale, grating=grating, N_rays=N_rays,
+                               files_path=files_path, results_path=results_path)
 
     # Some info on speed and number of rays:
     #   - 100 rays: ~6 sec per wavelength

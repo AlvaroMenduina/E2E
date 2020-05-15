@@ -1837,7 +1837,7 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
             ifu = settings['ifu']
             slicer_surface = focal_planes[system][spaxel_scale][ifu]['IS']
 
-            px, py = define_pupil_sampling(r_obsc=0.5, N_rays=N_rays, mode='random')
+            px, py = define_pupil_sampling(r_obsc=0.2841, N_rays=N_rays, mode='random')
             print("Using %d rays" % N_rays)
 
             results = self.run_analysis(analysis_function=self.analysis_function_ensquared_energy,
