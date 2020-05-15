@@ -31,6 +31,8 @@ sha = repo.head.object.hexsha
 
 # Parameters
 
+det_pix = 15e-3     # Detector pixel 15 microns
+
 # We need to know the Zemax surface number for all Focal Planes
 # for each mode (ELT, HARMONI, IFS) and for each spaxel scale (4x4, 10x10, 20x20, 60x30)
 # for the FPRS, PO, IFU, SPEC focal planes
@@ -254,6 +256,15 @@ def get_wavelengths(system, info=False):
             print("%.5f microns" % _wave)
 
     return wavelength_array
+
+
+def define_pupil_sampling(r_obsc, N_rays, mode='random'):
+    if mode == 'random':
+        r = np.random.uniform(low=r_obsc, high=1.0, size=N_rays)
+        theta = np.random.uniform(low=0.0, high=2 * np.pi, size=N_rays)
+        px, py = r * np.cos(theta), r * np.sin(theta)
+
+    return px, py
 
 
 def create_zemax_file_list(which_system,
@@ -1640,10 +1651,13 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
     """
 
     @staticmethod
-    def analysis_function_ensquared_energy(system, wave_idx, config, slicer_surface, detector_surface, N_rays):
+    def analysis_function_ensquared_energy(system, wave_idx, config, surface, slicer_surface, px, py):
 
         # Set Current Configuration
         system.MCE.SetCurrentConfiguration(config)
+
+        # Detector is always the last surface
+        detector_surface = system.LDE.NumberOfSurfaces - 1
 
         # Get the Field Points for that configuration
         sysField = system.SystemData.Fields
@@ -1662,62 +1676,132 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
         hx, hy = fx / r_max, fy / r_max  # Normalized field coordinates (hx, hy)
         obj_xy = np.array([fx, fy])
 
-        def define_pupil_sampling(r_obsc, N_rays, mode='random'):
-
-            if mode == 'random':
-                r = np.random.uniform(low=r_obsc, high=1.0, size=N_rays)
-                theta = np.random.uniform(low=0.0, high=2*np.pi, size=N_rays)
-                px, py = r * np.cos(theta), r * np.sin(theta)
-
-            return px, py
+        N_rays = px.shape[0]
 
         slicer_xy = np.empty((N_rays, 2))
         detector_xy = np.empty((N_rays, 2))
-        px, py = define_pupil_sampling(r_obsc=0.5, N_rays=N_rays, mode='random')
 
-        if config == 1:
-            print("\nTracing %d rays to calculate Ensquared Energy" % (N_rays))
-            fig, ax = plt.subplots(1, 1)
-            ax.scatter(px, py, s=3, color='black')
-            ax.set_xlabel(r'P_x')
-            ax.set_ylabel(r'P_y')
-            ax.set_xlim([-1, 1])
-            ax.set_ylim([-1, 1])
-            ax.set_title(r'%s rays' % N_rays)
-
-        raytrace = system.Tools.OpenBatchRayTrace()
+        raytrace_slicer = system.Tools.OpenBatchRayTrace()
         # remember to specify the surface to which you are tracing!
-        normUnPolData = raytrace.CreateNormUnpol(N_rays, constants.RaysType_Real, slicer_surface)
+        rays_slicer = raytrace_slicer.CreateNormUnpol(N_rays, constants.RaysType_Real, slicer_surface)
         for (p_x, p_y) in zip(px, py):
             # Add the ray to the RayTrace
-            normUnPolData.AddRay(wave_idx, hx, hy, p_x, p_y, constants.OPDMode_None)
+            rays_slicer.AddRay(wave_idx, hx, hy, p_x, p_y, constants.OPDMode_None)
 
-        # Run the RayTrace for the whole Slice
-        CastTo(raytrace, 'ISystemTool').RunAndWaitForCompletion()
-        normUnPolData.StartReadingResults()
+        CastTo(raytrace_slicer, 'ISystemTool').RunAndWaitForCompletion()
+        rays_slicer.StartReadingResults()
+        checksum_slicer = 0
         for i in range(N_rays):
-            output = normUnPolData.ReadNextResult()
+            output = rays_slicer.ReadNextResult()
             if output[2] == 0 and output[3] == 0:
                 slicer_xy[i, 0] = output[4]
                 slicer_xy[i, 1] = output[5]
+                checksum_slicer += 1
+        if checksum_slicer < N_rays:
+            raise ValueError('Some rays were lost before the Image Slicer')
 
-        normUnPolData.ClearData()
-        CastTo(raytrace, 'ISystemTool').Close()
+        rays_slicer.ClearData()
+        # CastTo(raytrace_slicer, 'ISystemTool').Close()
 
-        fig, ax = plt.subplots(1, 1)
-        ax.scatter(slicer_xy[:, 0], slicer_xy[:, 1], s=3, color='black')
-        ax.set_xlabel(r'Slicer X [mm]')
-        ax.set_ylabel(r'Slicer Y [mm]')
-        # ax.set_xlim([-1, 1])
-        # ax.set_ylim([-1, 1])
-        ax.set_title(r'%s rays' % N_rays)
-        plt.show()
+        # Count how many rays fall inside a +- 1 mm window in Y
+        scx, scy = np.mean(slicer_xy[:, 0]), np.mean(slicer_xy[:, 1])
+        below_slicer = slicer_xy[:, 1] < scy + 1.0
+        above_slicer = slicer_xy[:, 1] > scy - 1.0
+        inside_slicer = (np.logical_and(below_slicer, above_slicer))
+        total_slicer = np.sum(inside_slicer)
+        index_valid_slicer = np.argwhere(inside_slicer == True)
+        # print(index_slicer)
+
+        # (2) Run the raytrace up to the DETECTOR
+        # For speed, we re-use the same Raytrace, just define new rays!
+        # raytrace_det = system.Tools.OpenBatchRayTrace()
+        rays_detector = raytrace_slicer.CreateNormUnpol(N_rays, constants.RaysType_Real, detector_surface)
+        for (p_x, p_y) in zip(px, py):
+            rays_detector.AddRay(wave_idx, hx, hy, p_x, p_y, constants.OPDMode_None)
+        CastTo(raytrace_slicer, 'ISystemTool').RunAndWaitForCompletion()
+        rays_detector.StartReadingResults()
+        checksum_detector = 0
+        index_valid_detector = []
+        for i in range(N_rays):
+            output = rays_detector.ReadNextResult()
+            if output[2] == 0 and output[3] == 0:
+                detector_xy[i, 0] = output[4]
+                detector_xy[i, 1] = output[5]
+                checksum_detector += 1
+                index_valid_detector.append(i)
+        # if checksum_detector < N_rays:
+        #     print('Some rays were lost after the Image Slicer: ', checksum_detector)
+        #
+
+        rays_detector.ClearData()
+        CastTo(raytrace_slicer, 'ISystemTool').Close()
+
+        # We only count the rays that where inside the slicer to begin with and the ones that make it to the detector
+        valid_both = []
+        for i in range(N_rays):
+            if i in index_valid_slicer and i in index_valid_detector:
+                valid_both.append(i)
+
+        valid_det_x = detector_xy[:, 0][valid_both]
+        valid_det_y = detector_xy[:, 1][valid_both]
+
+        # Now we calculate which detector rays fall inside a 2x pixel box along X
+        sdx = np.mean(valid_det_x)
+        sdy = np.mean(valid_det_y)
+
+        left_detector = valid_det_x < sdx + det_pix
+        right_detector = valid_det_x > sdx - det_pix
+        inside_detector = (np.logical_and(left_detector, right_detector))
+        total_detector = np.sum(inside_detector)
+        EE = total_detector / N_rays
+
+        # print("\nRays Traced: ", N_rays)
+        # print("Make it to the Image Slicer: %d / %d" % (checksum_slicer, N_rays))
+        # print("Inside 2 slice box: %d / %d" % (total_slicer, N_rays))
+        # print("Make it to the Detector: %d / %d" % (checksum_detector, N_rays))
+        # print("Inside 2 pixel box: %d / %d" % (total_detector, checksum_detector))
+        # print("Ensquared Energy: %.3f" % EE)
 
 
-        ensq_ener = 0.0
+        # if config in [1, 2, 3] and wave_idx == 1:
+        #
+        #     print("\nTracing %d rays to calculate Ensquared Energy" % (N_rays))
+        #     fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
+        #     ax1.scatter(px, py, s=5, color='red')
+        #     ax1.scatter(px[valid_both], py[valid_both], s=5, color='lime')
+        #     ax1.set_xlabel(r'$P_x$')
+        #     ax1.set_ylabel(r'$P_y$')
+        #     ax1.set_xlim([-1, 1])
+        #     ax1.set_ylim([-1, 1])
+        #     ax1.set_title(r'Pupil Plane | %s rays' % N_rays)
+        #     ax1.set_aspect('equal')
+        #
+        #     sx, sy = slicer_xy[:, 0], slicer_xy[:, 1]
+        #     scx, scy = np.mean(sx), np.mean(sy)
+        #     ax2.scatter(sx, sy, s=3, color='blue')
+        #     ax2.scatter(scx, scy, s=8, color='red')
+        #     ax2.axhline(y=scy + 1.0, color='black', linestyle='--')
+        #     ax2.axhline(y=scy - 1.0, color='black', linestyle='--')
+        #     ax2.set_xlabel(r'Slicer X [mm]')
+        #     ax2.set_ylabel(r'Slicer Y [mm]')
+        #     ax2.set_xlim([scx - 2, scx + 2])
+        #     ax2.set_ylim([scy - 2, scy + 2])
+        #     ax2.set_title(r'Image Slicer | $\pm$1 mm wrt Centroid')
+        #     ax2.set_aspect('equal')
+        #
+        #     ax3.scatter(valid_det_x, valid_det_y, s=3, color='green')
+        #     ax3.axvline(x=sdx + pix, color='black', linestyle='--')
+        #     ax3.axvline(x=sdx - pix, color='black', linestyle='--')
+        #     ax3.set_xlabel(r'Detector X [mm]')
+        #     ax3.set_ylabel(r'Detector Y [mm]')
+        #     ax3.set_xlim([sdx - 2*pix, sdx + 2*pix])
+        #     ax3.set_ylim([sdy - 2*pix, sdy + 2*pix])
+        #     ax3.set_title(r'Detector Plane | $\pm$15 $\mu$m wrt Centroid')
+        #     ax3.set_aspect('equal')
+        # plt.show()
 
 
-        return [ensq_ener, obj_xy, foc_xy]
+        return [EE, obj_xy, [scx, scy], [sdx, sdy]]
 
     def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
                         configuration_idx=None, N_rays=500):
@@ -1737,30 +1821,33 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
         """
 
         # We want the result to produce as output: the RMS WFE array, and the RayTrace at both Object and Focal plane
-        results_names = ['EE_WFE', 'OBJ_XY', 'FOC_XY']
+        results_names = ['EE_WFE', 'OBJ_XY', 'SLI_XY', 'DET_XY']
         # we need to give the shapes of each array to self.run_analysis
-        results_shapes = [(1,), (2,), (N_rays, 2)]
+        results_shapes = [(1,), (2,), (2,), (2,)]
 
         # read the file options
         file_list, file_settings = create_zemax_file_list(which_system=files_opt['which_system'], AO_modes=files_opt['AO_modes'],
                                            scales=files_opt['scales'], IFUs=files_opt['IFUs'], grating=files_opt['grating'])
 
-
+        list_results = []
         for zemax_file, settings in zip(file_list, file_settings):
 
             system = settings['system']
             spaxel_scale = settings['scale']
             ifu = settings['ifu']
             slicer_surface = focal_planes[system][spaxel_scale][ifu]['IS']
-            detector_surface = focal_planes[system][spaxel_scale][ifu]['DET']
 
-            list_results = self.run_analysis(analysis_function=self.analysis_function_ensquared_energy,
-                                             files_dir=files_dir, zemax_file=zemax_file, results_path=results_path,
-                                             results_shapes=results_shapes, results_names=results_names,
-                                             wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
-                                             slicer_surface=slicer_surface, detector_surface=detector_surface, N_rays=N_rays)
+            px, py = define_pupil_sampling(r_obsc=0.5, N_rays=N_rays, mode='random')
+            print("Using %d rays" % N_rays)
 
-            ensq_ener, obj_xy, foc_xy, wavelengths = list_results
+            results = self.run_analysis(analysis_function=self.analysis_function_ensquared_energy,
+                                        files_dir=files_dir, zemax_file=zemax_file, results_path=results_path,
+                                        results_shapes=results_shapes, results_names=results_names,
+                                        wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
+                                        slicer_surface=slicer_surface, px=px, py=py)
+
+            ensq_ener, obj_xy, slicer_xy, detector_xy, wavelengths = results
+            list_results.append(results)
 
             # # Post-Processing the results
             # file_name = zemax_file.split('.')[0]
