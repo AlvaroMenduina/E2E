@@ -210,23 +210,29 @@ def stitch_fields(zosapi, spaxel_scale, spaxels_per_slice, wavelength_idx, spect
                 _foc_xy = focal_coord[k]
                 _rms_field = rms_maps[k]
 
-                x, y = _foc_xy[:, :, :, 0].flatten(), _foc_xy[:, :, :, 1].flatten()
-                triang = tri.Triangulation(x, y)
+                x_odd, y_odd = _foc_xy[:, ::2, :, 0].flatten(), _foc_xy[:, ::2, :, 1].flatten()
+                x_even, y_even = _foc_xy[:, 1::2, :, 0].flatten(), _foc_xy[:, 1::2, :, 1].flatten()
+                triang_odd = tri.Triangulation(x_odd, y_odd)
+                triang_even = tri.Triangulation(x_even, y_even)
 
                 # Remove the flat triangles at the detector edges that appear because of the field curvature
                 min_circle_ratio = .05
-                mask = tri.TriAnalyzer(triang).get_flat_tri_mask(min_circle_ratio)
-                triang.set_mask(mask)
+                mask_odd = tri.TriAnalyzer(triang_odd).get_flat_tri_mask(min_circle_ratio)
+                triang_odd.set_mask(mask_odd)
+                mask_even = tri.TriAnalyzer(triang_even).get_flat_tri_mask(min_circle_ratio)
+                triang_even.set_mask(mask_even)
 
-                tpc = ax.tripcolor(triang, _rms_field.flatten(), shading='flat', cmap='jet')
-                tpc.set_clim(vmin=min_rms, vmax=max_rms)
+                tpc_odd = ax.tripcolor(triang_odd, _rms_field[:, ::2].flatten(), shading='flat', cmap='jet')
+                tpc_odd.set_clim(vmin=min_rms, vmax=max_rms)
+                tpc_even = ax.tripcolor(triang_even, _rms_field[:, 1::2].flatten(), shading='flat', cmap='jet')
+                tpc_even.set_clim(vmin=min_rms, vmax=max_rms)
                 # ax.scatter(x, y, s=2, color='black')
                 axis_label = 'Detector'
                 ax.set_xlabel(axis_label + r' X [mm]')
                 ax.set_ylabel(axis_label + r' Y [mm]')
                 ax.set_aspect('equal')
-                plt.colorbar(tpc, ax=ax, orientation='horizontal')
-                title = r'IFU-%s' % (ifu_section)
+                plt.colorbar(tpc_odd, ax=ax, orientation='horizontal')
+                title = r'IFU-%s | %s mas | %s SPEC' % (ifu_section, spaxel_scale, spectral_band)
                 ax.set_title(title)
                 fig_name = "RMSMAP_%s_DETECTOR_SPEC_%s" % (spaxel_scale, spectral_band)
                 if os.path.isfile(os.path.join(results_path, fig_name)):
@@ -447,48 +453,22 @@ if __name__ == """__main__""":
     files_path = os.path.abspath("D:\End to End Model\April_2020")
     results_path = os.path.abspath("D:\End to End Model\Results_April")
 
-    analysis = e2e.RMS_WFE_Analysis(zosapi=psa)
-    options = {'which_system': 'IFS', 'AO_modes': [], 'scales': ['60x30'], 'IFUs': ['AB'],
-               'grating': ['H']}
-    # We need to know the Surface Number for the focal plane of interest in the Zemax files
-    # this is something varies with mode, scale, ifu channel so we save those numbers on e2e.focal_planes dictionary
-    focal_plane = e2e.focal_planes['IFS']['60x30']['AB']['PO']
-    list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options, results_path=results_path,
-                                            wavelength_idx=None, configuration_idx=None,
-                                            surface=focal_plane, spaxels_per_slice=15, plots=False)
-
+    # analysis = e2e.RMS_WFE_Analysis(zosapi=psa)
+    # options = {'which_system': 'IFS', 'AO_modes': [], 'scales': ['60x30'], 'IFUs': ['AB'],
+    #            'grating': ['H']}
+    # # We need to know the Surface Number for the focal plane of interest in the Zemax files
+    # # this is something varies with mode, scale, ifu channel so we save those numbers on e2e.focal_planes dictionary
+    # focal_plane = e2e.focal_planes['IFS']['60x30']['AB']['PO']
     # list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options, results_path=results_path,
-    #                                         wavelength_idx=[3, 4], configuration_idx=[1, 2, 34],
-    #                                         surface=focal_plane, spaxels_per_slice=7, plots=False)
-
-
-    import h5py
-    path_hdf5 = os.path.join(results_path, 'HDF5')
-    path_to_file = os.path.join(path_hdf5, 'CRYO_PO60x30_IFUAB_SPECH.hdf5')
-
-
-
-    zemax_metadata = e2e.read_hdf5(path_to_file)
-
-
-
-    print("\nReading Data:")
-    data = file['RMS_WFE']
-    list_arrays, list_names = [], []
-    for dataset in data.keys():
-        array = data[dataset][:]  # adding [:] returns a numpy array
-        print("%s | " % dataset, array.shape, array.dtype)
-        list_arrays.append(array)
-        list_names.append(dataset)
-
-
-
-
-
-
-    list_arrays, list_names, metadata = e2e.read_hdf5(file)
-
-
+    #                                         wavelength_idx=None, configuration_idx=None,
+    #                                         surface=focal_plane, spaxels_per_slice=15, plots=False)
+    #
+    # import h5py
+    # path_hdf5 = os.path.join(results_path, 'HDF5')
+    # path_to_file = os.path.join(path_hdf5, 'CRYO_PO60x30_IFUAB_SPECH.hdf5')
+    #
+    #
+    # zemax_metadata = e2e.read_hdf5(path_to_file)
 
     " (5) Detector Plane "
 
@@ -502,11 +482,11 @@ if __name__ == """__main__""":
         os.mkdir(analysis_dir)
 
     gratings = ['Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
-    for spaxel_scale in ['4x4']:
+    for spaxel_scale in ['20x20']:
 
         rms_grating = []
-        for grating in gratings:
-            stitched_results = stitch_fields(zosapi=psa, spaxel_scale=spaxel_scale, spaxels_per_slice=3, wavelength_idx=None,
+        for grating in ['H']:
+            stitched_results = stitch_fields(zosapi=psa, spaxel_scale=spaxel_scale, spaxels_per_slice=1, wavelength_idx=None,
                                              spectral_band=grating, plane='DET',files_path=files_path, results_path=results_path,
                                              show='focal')
             rms_allifu = stitched_results[0]

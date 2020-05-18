@@ -47,16 +47,16 @@ def stitch_ensquare_energy(zosapi, spaxel_scale, grating, N_rays, files_path, re
         # fig, ax = plt.subplots(1, 1)
         ax = axes.flatten()[i]
         tpc_odd = ax.tripcolor(triang_odd, ener_ogg, shading='flat', cmap='Blues')
-        tpc_odd.set_clim(vmin=min_ener, vmax=max_ener)
+        tpc_odd.set_clim(vmin=min_ener, vmax=1.0)
         tpc_even = ax.tripcolor(triang_even, ener_even, shading='flat', cmap='Blues')
-        tpc_even.set_clim(vmin=min_ener, vmax=max_ener)
+        tpc_even.set_clim(vmin=min_ener, vmax=1.0)
         ax.scatter(x, y, s=2, color='black')
         axis_label = 'Detector'
         ax.set_xlabel(axis_label + r' X [mm]')
         ax.set_ylabel(axis_label + r' Y [mm]')
         ax.set_aspect('equal')
         plt.colorbar(tpc_odd, ax=ax, orientation='horizontal')
-        title = r'IFU-%s' % (ifu)
+        title = r'IFU-%s | %s mas | %s SPEC' % (ifu, spaxel_scale, grating)
         ax.set_title(title)
 
     fig_name = "ENSQUARED_ENERGY_DETECTOR_PO%s_SPEC_%s" % (spaxel_scale, grating)
@@ -79,8 +79,9 @@ if __name__ == """__main__""":
     files_path = os.path.abspath("D:\End to End Model\April_2020")
     results_path = os.path.abspath("D:\End to End Model\Results_April")
 
-    spaxel_scale = '60x30'
-    gratings = ['IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
+    spaxel_scale = '4x4'
+    # gratings = ['Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
+    gratings = ['H']
     N_rays = 1000
 
     for grating in gratings:

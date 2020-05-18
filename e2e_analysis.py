@@ -259,8 +259,19 @@ def get_wavelengths(system, info=False):
 
 
 def define_pupil_sampling(r_obsc, N_rays, mode='random'):
+
     if mode == 'random':
-        r = np.random.uniform(low=r_obsc, high=1.0, size=N_rays)
+        # Ideally we want to define a Uniform Distribution for the (X, Y) points in the unit disk
+        # but sampling from the radial coordinates
+        # If one defines a uniform distribution for (r, theta) the resulting (x, y) coordinates won't follow
+        # a Uniform Distribution! there will be more points concentrated around de centre...
+
+        # We can fix that by using the "Probability Density Under Transformation" as described in:
+        # https://www.cs.cornell.edu/courses/cs6630/2015fa/notes/pdf-transform.pdf
+        # Sampling as: r -> sqrt(eps_1) and theta -> 2 pi eps_2, with eps_1 and eps_2 uniform distributions [0, 1]
+        # results in a (X, Y) which is uniform!
+
+        r = np.sqrt(np.random.uniform(low=r_obsc**2, high=1.0, size=N_rays))
         theta = np.random.uniform(low=0.0, high=2 * np.pi, size=N_rays)
         px, py = r * np.cos(theta), r * np.sin(theta)
 
@@ -1724,11 +1735,16 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
         index_valid_detector = []
         for i in range(N_rays):
             output = rays_detector.ReadNextResult()
-            if output[2] == 0 and output[3] == 0:
+            if output[2] == 0 and output[3] == 0:       # ErrorCode & VignetteCode
                 detector_xy[i, 0] = output[4]
                 detector_xy[i, 1] = output[5]
                 checksum_detector += 1
                 index_valid_detector.append(i)
+            else:
+                # Some rays are lost
+                error_code = output[2]
+                vignette_code = output[3]
+                # print("\nError Code: %d | Vignette Code: %d" % (error_code, vignette_code))
         # if checksum_detector < N_rays:
         #     print('Some rays were lost after the Image Slicer: ', checksum_detector)
         #
@@ -1755,50 +1771,57 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
         total_detector = np.sum(inside_detector)
         EE = total_detector / N_rays
 
-        # print("\nRays Traced: ", N_rays)
-        # print("Make it to the Image Slicer: %d / %d" % (checksum_slicer, N_rays))
-        # print("Inside 2 slice box: %d / %d" % (total_slicer, N_rays))
-        # print("Make it to the Detector: %d / %d" % (checksum_detector, N_rays))
-        # print("Inside 2 pixel box: %d / %d" % (total_detector, checksum_detector))
-        # print("Ensquared Energy: %.3f" % EE)
+
+        if EE > 1.00:
+            print(config, wave_idx)
+            raise ValueError("Ensquared Energy is larger than 1.0")
 
 
-        # if config in [1, 2, 3] and wave_idx == 1:
-        #
-        #     print("\nTracing %d rays to calculate Ensquared Energy" % (N_rays))
-        #     fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
-        #     ax1.scatter(px, py, s=5, color='red')
-        #     ax1.scatter(px[valid_both], py[valid_both], s=5, color='lime')
-        #     ax1.set_xlabel(r'$P_x$')
-        #     ax1.set_ylabel(r'$P_y$')
-        #     ax1.set_xlim([-1, 1])
-        #     ax1.set_ylim([-1, 1])
-        #     ax1.set_title(r'Pupil Plane | %s rays' % N_rays)
-        #     ax1.set_aspect('equal')
-        #
-        #     sx, sy = slicer_xy[:, 0], slicer_xy[:, 1]
-        #     scx, scy = np.mean(sx), np.mean(sy)
-        #     ax2.scatter(sx, sy, s=3, color='blue')
-        #     ax2.scatter(scx, scy, s=8, color='red')
-        #     ax2.axhline(y=scy + 1.0, color='black', linestyle='--')
-        #     ax2.axhline(y=scy - 1.0, color='black', linestyle='--')
-        #     ax2.set_xlabel(r'Slicer X [mm]')
-        #     ax2.set_ylabel(r'Slicer Y [mm]')
-        #     ax2.set_xlim([scx - 2, scx + 2])
-        #     ax2.set_ylim([scy - 2, scy + 2])
-        #     ax2.set_title(r'Image Slicer | $\pm$1 mm wrt Centroid')
-        #     ax2.set_aspect('equal')
-        #
-        #     ax3.scatter(valid_det_x, valid_det_y, s=3, color='green')
-        #     ax3.axvline(x=sdx + pix, color='black', linestyle='--')
-        #     ax3.axvline(x=sdx - pix, color='black', linestyle='--')
-        #     ax3.set_xlabel(r'Detector X [mm]')
-        #     ax3.set_ylabel(r'Detector Y [mm]')
-        #     ax3.set_xlim([sdx - 2*pix, sdx + 2*pix])
-        #     ax3.set_ylim([sdy - 2*pix, sdy + 2*pix])
-        #     ax3.set_title(r'Detector Plane | $\pm$15 $\mu$m wrt Centroid')
-        #     ax3.set_aspect('equal')
-        # plt.show()
+        print("\nRays Traced: ", N_rays)
+        print("Make it to the Image Slicer: %d / %d" % (checksum_slicer, N_rays))
+        print("Inside 2 slice box: %d / %d" % (total_slicer, N_rays))
+        print("Make it to the Detector: %d / %d" % (checksum_detector, N_rays))
+        print("Inside 2 pixel box: %d / %d" % (total_detector, checksum_detector))
+        print("Ensquared Energy: %.3f" % EE)
+
+
+        if config in [1, 2, 3] and wave_idx == 1:
+
+            print("\nTracing %d rays to calculate Ensquared Energy" % (N_rays))
+            fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
+            ax1.scatter(px, py, s=5, color='red')
+            ax1.scatter(px[valid_both], py[valid_both], s=5, color='lime')
+            ax1.set_xlabel(r'$P_x$')
+            ax1.set_ylabel(r'$P_y$')
+            ax1.set_xlim([-1, 1])
+            ax1.set_ylim([-1, 1])
+            ax1.set_title(r'Pupil Plane | %s rays' % N_rays)
+            ax1.set_aspect('equal')
+
+            sx, sy = slicer_xy[:, 0], slicer_xy[:, 1]
+            scx, scy = np.mean(sx), np.mean(sy)
+            ax2.scatter(sx, sy, s=3, color='red')
+            ax2.scatter(sx[valid_both], sy[valid_both], s=3, color='blue')
+            # ax2.scatter(scx, scy, s=8, color='red')
+            ax2.axhline(y=scy + 0.5, color='black', linestyle='--')
+            ax2.axhline(y=scy - 0.5, color='black', linestyle='--')
+            ax2.set_xlabel(r'Slicer X [mm]')
+            ax2.set_ylabel(r'Slicer Y [mm]')
+            ax2.set_xlim([scx - 1, scx + 1])
+            ax2.set_ylim([scy - 1, scy + 1])
+            ax2.set_title(r'Image Slicer | $\pm$0.5 mm wrt Centroid')
+            ax2.set_aspect('equal')
+
+            ax3.scatter(valid_det_x, valid_det_y, s=3, color='green')
+            ax3.axvline(x=sdx + det_pix, color='black', linestyle='--')
+            ax3.axvline(x=sdx - det_pix, color='black', linestyle='--')
+            ax3.set_xlabel(r'Detector X [mm]')
+            ax3.set_ylabel(r'Detector Y [mm]')
+            ax3.set_xlim([sdx - 2*det_pix, sdx + 2*det_pix])
+            ax3.set_ylim([sdy - 2*det_pix, sdy + 2*det_pix])
+            ax3.set_title(r'Detector Plane | $\pm$15 $\mu$m wrt Centroid')
+            ax3.set_aspect('equal')
+        plt.show()
 
 
         return [EE, obj_xy, [scx, scy], [sdx, sdy]]
