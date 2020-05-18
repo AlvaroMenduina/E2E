@@ -482,11 +482,11 @@ if __name__ == """__main__""":
         os.mkdir(analysis_dir)
 
     gratings = ['Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
-    for spaxel_scale in ['20x20']:
+    for spaxel_scale in ['60x30']:
 
         rms_grating = []
-        for grating in ['H']:
-            stitched_results = stitch_fields(zosapi=psa, spaxel_scale=spaxel_scale, spaxels_per_slice=1, wavelength_idx=None,
+        for grating in gratings:
+            stitched_results = stitch_fields(zosapi=psa, spaxel_scale=spaxel_scale, spaxels_per_slice=3, wavelength_idx=None,
                                              spectral_band=grating, plane='DET',files_path=files_path, results_path=results_path,
                                              show='focal')
             rms_allifu = stitched_results[0]

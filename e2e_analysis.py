@@ -143,6 +143,53 @@ class PythonStandaloneApplication(object):
         else:
             return "Invalid"
 
+from scipy.optimize import curve_fit
+
+def twoD_Gaussian(data_tuple, x0, y0, sigma_x, sigma_y, theta):
+    # Asymmetric 2d Gaussian
+    (x, y) = data_tuple
+    x0 = float(x0)
+    y0 = float(y0)
+    a = (np.cos(theta)**2)/(2*sigma_x**2) + (np.sin(theta)**2)/(2*sigma_y**2)
+    b = -(np.sin(2*theta))/(4*sigma_x**2) + (np.sin(2*theta))/(4*sigma_y**2)
+    c = (np.sin(theta)**2)/(2*sigma_x**2) + (np.cos(theta)**2)/(2*sigma_y**2)
+    g = np.exp(-(a*((x-x0)**2) + 2*b*(x-x0)*(y-y0) + c*((y-y0)**2)))
+    return g
+
+def fit_gaussian(xx, yy, data, x0, y0):
+
+    # peak, offset = 1.0, 0.0
+    sigmax0, sigmay0 = 0.010, 0.010     # 10 microns
+    rotation0 = 0.0
+    init = [x0, y0, sigmax0, sigmay0, rotation0]  # first guess of 1.0 for sigma
+    bounds = ([-np.inf, -np.inf, 0.0, 0.0, -np.pi/2],
+              [np.inf, np.inf, np.inf, np.inf, np.pi/2])
+
+    try:
+        pars, cov = curve_fit(twoD_Gaussian, (xx.ravel(), yy.ravel()), data.ravel(), p0=init, bounds=bounds)
+        sigmaX, sigmaY, theta = pars[2], pars[3], pars[4]
+
+    except RuntimeError:
+        fig, ax = plt.subplots(1, 1)
+        # img = ax.imshow(data, cmap='bwr', origin='lower')
+        ax.scatter(x0, y0, s=3, color='black', alpha=0.5)
+        # plt.colorbar(img, ax=ax)
+        plt.show()
+        sigmaX, sigmaY, theta = np.nan, np.nan, np.nan
+    return sigmaX, sigmaY, theta
+
+# x = np.linspace(-1, 1, 100)
+# xx, yy = np.meshgrid(x, x)
+# g = twoD_Gaussian(data_tuple=(xx, yy), x0=0.25, y0=0.15, sigma_x=1, sigma_y=0.5, theta=-np.pi/4)
+#
+# sigmaX, sigmaY, theta = fit_gaussian(xx, yy, g, x0=0.01, y0=0.01)
+#
+# plt.figure()
+# plt.imshow(g, origin='lower', extent=[-1, 1, -1, 1])
+# plt.xlabel(r'X[mm]')
+# plt.ylabel(r'Y[mm]')
+# plt.colorbar()
+# plt.show()
 
 def read_hdf5(path_to_file):
     """
@@ -1967,7 +2014,7 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
         if config == 1:
             print("\nTracing %d rays to calculate FWHM PSF" % (N_rays_inside))
 
-        fig, axes = plt.subplots(1, N_fields)
+        # fig, axes = plt.subplots(1, N_fields)
 
         # Loop over each Field computing the Spot Diagram
         for j in range(N_fields):
@@ -2040,16 +2087,34 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
             psf = np.exp(log_scores)
             psf /= np.max(psf)
             psf = psf.reshape(xx_grid.shape)
-            PSF_cube[j] = psf
 
-            ax = axes[j]
-            img = ax.imshow(psf, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
-            # ax.scatter(x, y, s=3, color='black', alpha=0.5)
-            plt.colorbar(img, ax=ax, orientation='horizontal')
-            ax.set_xlim([xmin, xmax])
-            ax.set_ylim([ymin, ymax])
+            # Fit the PSF to a 2D Gaussian
+            sigmaX, sigmaY, theta = fit_gaussian(xx=xx_grid, yy=yy_grid, data=psf, x0=cent_x, y0=cent_y)
+            fwhm_x = 2 * np.sqrt(2 * np.log(2)) * sigmaX * 1000
+            fwhm_y = 2 * np.sqrt(2 * np.log(2)) * sigmaY * 1000
 
-            # FWHM[j, :] = [-99, fwhm_x, fwhm_y]        # Store the results
+            # print("FWHM_x: %.1f | FWHM_y: %.1f | Theta: %.1f" % (fwhm_x, fwhm_y, np.rad2deg(theta)))
+
+            # fig, (ax1, ax2) = plt.subplots(1, 2)
+            # img1 = ax1.imshow(psf, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
+            # ax1.scatter(x, y, s=3, color='black', alpha=0.5)
+            # plt.colorbar(img1, ax=ax1, orientation='horizontal')
+            #
+            # fit = twoD_Gaussian(data_tuple=(xx_grid, yy_grid), x0=cent_x, y0=cent_y, sigma_x=sigmaX, sigma_y=sigmaY,
+            #                     theta=theta, amplitude=1.0, offset=0.0)
+            # img2 = ax2.imshow(fit, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
+            # plt.colorbar(img2, ax=ax2, orientation='horizontal')
+
+            # PSF_cube[j] = psf
+            #
+            # ax = axes[j]
+            # img = ax.imshow(psf, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
+            # # ax.scatter(x, y, s=3, color='black', alpha=0.5)
+            # plt.colorbar(img, ax=ax, orientation='horizontal')
+            # ax.set_xlim([xmin, xmax])
+            # ax.set_ylim([ymin, ymax])
+
+            FWHM[j, :] = [-99, fwhm_x, fwhm_y]        # Store the results
 
         plt.show()
         #
@@ -2527,17 +2592,17 @@ class RMS_WFE_Analysis(AnalysisGeneric):
         normUnPolData.ClearData()
         CastTo(raytrace, 'ISystemTool').Close()
 
-        # Get the transformation from Local to Global Coordinates
-        global_mat = system.LDE.GetGlobalMatrix(surface)
-        R11, R12, R13, R21, R22, R23, R31, R32, R33, X0, Y0, Z0 = global_mat[1:]
-        global_matrix = np.array([[R11, R12, R13],
-                                  [R21, R22, R23],
-                                  [R31, R32, R33]])
-        offset = np.array([X0, Y0, Z0])
-
-        # Transform from Local to Global and only save X and Y
-        global_xyz = (np.dot(global_matrix, local_xyz.T)).T + offset
-        global_xy = global_xyz[:, :2]
+        # # Get the transformation from Local to Global Coordinates
+        # global_mat = system.LDE.GetGlobalMatrix(surface)
+        # R11, R12, R13, R21, R22, R23, R31, R32, R33, X0, Y0, Z0 = global_mat[1:]
+        # global_matrix = np.array([[R11, R12, R13],
+        #                           [R21, R22, R23],
+        #                           [R31, R32, R33]])
+        # offset = np.array([X0, Y0, Z0])
+        #
+        # # Transform from Local to Global and only save X and Y
+        # global_xyz = (np.dot(global_matrix, local_xyz.T)).T + offset
+        # global_xy = global_xyz[:, :2]
 
         return [RMS_WFE, obj_xy, foc_xy, global_xy]
 
