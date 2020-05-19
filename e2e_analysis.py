@@ -19,6 +19,7 @@ from time import time
 import h5py
 import datetime
 from sklearn.neighbors import KernelDensity
+from scipy.signal import convolve2d
 
 from win32com.client.gencache import EnsureDispatch, EnsureModule
 from win32com.client import constants
@@ -145,7 +146,7 @@ class PythonStandaloneApplication(object):
 
 from scipy.optimize import curve_fit
 
-def twoD_Gaussian(data_tuple, x0, y0, sigma_x, sigma_y, theta):
+def twoD_Gaussian(data_tuple, x0, y0, sigma_x, sigma_y, theta, amplitude):
     # Asymmetric 2d Gaussian
     (x, y) = data_tuple
     x0 = float(x0)
@@ -153,7 +154,7 @@ def twoD_Gaussian(data_tuple, x0, y0, sigma_x, sigma_y, theta):
     a = (np.cos(theta)**2)/(2*sigma_x**2) + (np.sin(theta)**2)/(2*sigma_y**2)
     b = -(np.sin(2*theta))/(4*sigma_x**2) + (np.sin(2*theta))/(4*sigma_y**2)
     c = (np.sin(theta)**2)/(2*sigma_x**2) + (np.cos(theta)**2)/(2*sigma_y**2)
-    g = np.exp(-(a*((x-x0)**2) + 2*b*(x-x0)*(y-y0) + c*((y-y0)**2)))
+    g = amplitude * np.exp(-(a*((x-x0)**2) + 2*b*(x-x0)*(y-y0) + c*((y-y0)**2)))
     return g
 
 def fit_gaussian(xx, yy, data, x0, y0):
@@ -161,22 +162,46 @@ def fit_gaussian(xx, yy, data, x0, y0):
     # peak, offset = 1.0, 0.0
     sigmax0, sigmay0 = 0.010, 0.010     # 10 microns
     rotation0 = 0.0
-    init = [x0, y0, sigmax0, sigmay0, rotation0]  # first guess of 1.0 for sigma
-    bounds = ([-np.inf, -np.inf, 0.0, 0.0, -np.pi/2],
-              [np.inf, np.inf, np.inf, np.inf, np.pi/2])
+    init = [x0, y0, sigmax0, sigmay0, rotation0, 0.0]  # first guess of 1.0 for sigma
+    bounds = ([-np.inf, -np.inf, 0.0, 0.0, -np.pi/2, -np.inf],
+              [np.inf, np.inf, np.inf, np.inf, np.pi/2, np.inf])
 
     try:
         pars, cov = curve_fit(twoD_Gaussian, (xx.ravel(), yy.ravel()), data.ravel(), p0=init, bounds=bounds)
         sigmaX, sigmaY, theta = pars[2], pars[3], pars[4]
 
     except RuntimeError:
-        fig, ax = plt.subplots(1, 1)
-        # img = ax.imshow(data, cmap='bwr', origin='lower')
-        ax.scatter(x0, y0, s=3, color='black', alpha=0.5)
-        # plt.colorbar(img, ax=ax)
-        plt.show()
+        # fig, ax = plt.subplots(1, 1)
+        # # img = ax.imshow(data, cmap='bwr', origin='lower')
+        # ax.scatter(x0, y0, s=3, color='black', alpha=0.5)
+        # # plt.colorbar(img, ax=ax)
+        # plt.show()
         sigmaX, sigmaY, theta = np.nan, np.nan, np.nan
     return sigmaX, sigmaY, theta
+
+
+def pixelate_crosstalk_psf(raw_psf, PSF_window, N_points, xt=0.02):
+
+    pix_samp = PSF_window / N_points  # microns per PSF point
+    group = int(15 / pix_samp)
+    N = int(PSF_window / 15)
+    pix_psf = np.empty((N, N))
+    for i in range(N):
+        for j in range(N):
+            crop = raw_psf[i * group:(i + 1) * group, j * group:(j + 1) * group]
+            pix_psf[i, j] = np.mean(crop)
+
+    # Add Crosstalk
+    kernel = np.array([[0, xt, 0],
+                       [xt, 1 - 4 * xt, xt],
+                       [0, xt, 0]])
+    cross_psf = convolve2d(pix_psf, kernel, mode='same')
+
+    return cross_psf
+
+
+
+
 
 # x = np.linspace(-1, 1, 100)
 # xx, yy = np.meshgrid(x, x)
@@ -1966,7 +1991,7 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
     and estimating the diameter of the 50% contour line
     """
 
-    def analysis_function_geofwhm_psf(self, system, wave_idx, config, surface, N_rays, N_points,
+    def analysis_function_geofwhm_psf(self, system, wave_idx, config, surface, px, py, N_points,
                                       PSF_window, reference='Centroid'):
 
 
@@ -1994,42 +2019,36 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
         # sysField.AddField(fx_mean / 3.0, fy_mean, 1)
         # N_fields = sysField.NumberOfFields
 
-        # Pupil Rays
-        px = np.linspace(-1, 1, N_rays, endpoint=True)
-        pxx, pyy = np.meshgrid(px, px)
-        pupil_mask = np.sqrt(pxx**2 + pyy**2) <= 1.0
-        px, py = pxx[pupil_mask], pyy[pupil_mask]
-        # How many rays are actually inside the pupil aperture?
-        N_rays_inside = px.shape[0]
-        diam = 39       # meters
-        freq = diam / N_rays       # pupil plane frequency
+        N_rays = px.shape[0]
 
-        XY = np.empty((N_fields, N_rays_inside + 1, 2))     # Rays inside plus 1 for the chief ray extra
+        XY = np.empty((N_rays, 2))     # Rays inside plus 1 for the chief ray extra
 
         FWHM = np.zeros((N_fields, 3))          # [mean_radius, m_radiusX, m_radiusY]
         obj_xy = np.zeros((N_fields, 2))        # (fx, fy) coordinates
         foc_xy = np.empty((N_fields, 2))        # raytrace results of the Centroid
-        PSF_cube = np.empty((N_fields, N_points, N_points))
+        N = int(PSF_window / 15)
+        PSF_cube = np.empty((N_fields, N, N))
 
         if config == 1:
-            print("\nTracing %d rays to calculate FWHM PSF" % (N_rays_inside))
+            print("\nTracing %d rays to calculate FWHM PSF" % (N_rays))
 
         # fig, axes = plt.subplots(1, N_fields)
 
         # Loop over each Field computing the Spot Diagram
-        for j in range(N_fields):
+        for j in [0]:
 
-            fx, fy = sysField.GetField(j + 1).X, sysField.GetField(j + 1).Y
+            # fx, fy = sysField.GetField(j + 1).X, sysField.GetField(j + 1).Y
+            fx, fy = sysField.GetField(2).X, sysField.GetField(2).Y
             hx, hy = fx / r_max, fy / r_max      # Normalized field coordinates (hx, hy)
 
             obj_xy[j, :] = [fx, fy]
 
             raytrace = system.Tools.OpenBatchRayTrace()
             # remember to specify the surface to which you are tracing!
-            normUnPolData = raytrace.CreateNormUnpol(N_rays_inside + 1, constants.RaysType_Real, surface)
+            normUnPolData = raytrace.CreateNormUnpol(N_rays, constants.RaysType_Real, surface)
 
             # Add the Chief Ray
-            normUnPolData.AddRay(wave_idx, hx, hy, 0.0, 0.0, constants.OPDMode_None)
+            # normUnPolData.AddRay(wave_idx, hx, hy, 0.0, 0.0, constants.OPDMode_None)
 
             for (p_x, p_y) in zip(px, py):
                 # Add the ray to the RayTrace
@@ -2038,7 +2057,7 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
             # Run the RayTrace for the whole Slice
             CastTo(raytrace, 'ISystemTool').RunAndWaitForCompletion()
             normUnPolData.StartReadingResults()
-            for i in range(N_rays_inside + 1):
+            for i in range(N_rays):
                 output = normUnPolData.ReadNextResult()
                 if output[2] == 0 and output[3] == 0:
                     XY[j, i, 0] = output[4]
@@ -2075,8 +2094,8 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
             # define a grid to compute the PSF
             # xmin, xmax = cent_x - 3 * std, cent_x + 3 * std
             # ymin, ymax = cent_y - 3 * std, cent_y + 3 * std
-            xmin, xmax = cent_x - PSF_window/2/1000, cent_x + PSF_window/2/1000
-            ymin, ymax = cent_y - PSF_window/2/1000, cent_y + PSF_window/2/1000
+            xmin, xmax = cent_x - PSF_window/2/1000 + 7.5 / 1000, cent_x + PSF_window/2/1000 + 7.5 / 1000
+            ymin, ymax = cent_y - PSF_window/2/1000 + 7.5 / 1000, cent_y + PSF_window/2/1000 + 7.5 / 1000
             x_grid = np.linspace(xmin, xmax, N_points)
             y_grid = np.linspace(ymin, ymax, N_points)
             xx_grid, yy_grid = np.meshgrid(x_grid, y_grid)
@@ -2088,22 +2107,48 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
             psf /= np.max(psf)
             psf = psf.reshape(xx_grid.shape)
 
+            cross_psf = pixelate_crosstalk_psf(psf, PSF_window, N_points)
+            N_cross = cross_psf.shape[0]
+
+            x_cross = np.linspace(xmin, xmax, N_cross)
+            y_cross = np.linspace(ymin, ymax, N_cross)
+            xx_cross, yy_cross = np.meshgrid(x_cross, y_cross)
+
             # Fit the PSF to a 2D Gaussian
-            sigmaX, sigmaY, theta = fit_gaussian(xx=xx_grid, yy=yy_grid, data=psf, x0=cent_x, y0=cent_y)
+            sigmaX, sigmaY, theta = fit_gaussian(xx=xx_cross, yy=yy_cross, data=cross_psf, x0=cent_x, y0=cent_y)
+            # sigmaX_cross, sigmaY_cross, theta_cross = fit_gaussian(xx=xx_cross, yy=yy_cross, data=cross_psf, x0=cent_x, y0=cent_y)
             fwhm_x = 2 * np.sqrt(2 * np.log(2)) * sigmaX * 1000
+            # fwhm_x_cross = 2 * np.sqrt(2 * np.log(2)) * sigmaX_cross * 1000
             fwhm_y = 2 * np.sqrt(2 * np.log(2)) * sigmaY * 1000
+            # fwhm_y_cross = 2 * np.sqrt(2 * np.log(2)) * sigmaY_cross * 1000
 
-            # print("FWHM_x: %.1f | FWHM_y: %.1f | Theta: %.1f" % (fwhm_x, fwhm_y, np.rad2deg(theta)))
-
-            # fig, (ax1, ax2) = plt.subplots(1, 2)
+            # print("\nFWHM_x: %.1f | FWHM_y: %.1f | Theta: %.1f" % (fwhm_x, fwhm_y, np.rad2deg(theta)))
+            # print("FWHM_x: %.1f | FWHM_y: %.1f | Theta: %.1f" % (fwhm_x_cross, fwhm_y_cross, np.rad2deg(theta_cross)))
+            #
+            # fig, (ax1, ax2, ax3, ax4) = plt.subplots(1, 4)
             # img1 = ax1.imshow(psf, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
             # ax1.scatter(x, y, s=3, color='black', alpha=0.5)
             # plt.colorbar(img1, ax=ax1, orientation='horizontal')
+            # ax1.set_title('Ray Data')
             #
-            # fit = twoD_Gaussian(data_tuple=(xx_grid, yy_grid), x0=cent_x, y0=cent_y, sigma_x=sigmaX, sigma_y=sigmaY,
-            #                     theta=theta, amplitude=1.0, offset=0.0)
-            # img2 = ax2.imshow(fit, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
+            # img2 = ax2.imshow(cross_psf, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
             # plt.colorbar(img2, ax=ax2, orientation='horizontal')
+            # ax2.set_title(r'Pixelation + Crosstalk')
+            #
+            # # img3 = ax3.imshow(cross_psf, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
+            # # plt.colorbar(img3, ax=ax3, orientation='horizontal')
+            # #
+            # fit = twoD_Gaussian(data_tuple=(xx_grid, yy_grid), x0=cent_x, y0=cent_y, sigma_x=sigmaX_cross, sigma_y=sigmaY_cross,
+            #                     theta=theta_cross, amplitude=1.0)
+            # img3 = ax3.imshow(fit, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
+            # plt.colorbar(img3, ax=ax3, orientation='horizontal')
+            # ax3.set_title(r'Guassian Fit (High Res)')
+            #
+            # fit = twoD_Gaussian(data_tuple=(xx_cross, yy_cross), x0=cent_x, y0=cent_y, sigma_x=sigmaX_cross, sigma_y=sigmaY_cross,
+            #                     theta=theta_cross, amplitude=1.0)
+            # img4 = ax4.imshow(fit, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
+            # ax4.set_title(r'Guassian Fit (Pixelated)')
+            # plt.colorbar(img4, ax=ax4, orientation='horizontal')
 
             # PSF_cube[j] = psf
             #
@@ -2114,7 +2159,7 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
             # ax.set_xlim([xmin, xmax])
             # ax.set_ylim([ymin, ymax])
 
-            FWHM[j, :] = [-99, fwhm_x, fwhm_y]        # Store the results
+            FWHM[j, :] = [fwhm_x, fwhm_y, theta]        # Store the results
 
         plt.show()
         #
@@ -2130,7 +2175,7 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
 
 
     def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
-                        configuration_idx=None, surface=None, N_rays=40, N_points=100, PSF_window=50, plots=False):
+                        configuration_idx=None, surface=None, N_rays=40, N_points=150, PSF_window=150, plots=False):
         """
 
         """
@@ -2138,18 +2183,21 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
         # We want the result to produce as output: the RMS WFE array, and the RayTrace at both Object and Focal plane
         results_names = ['GEO_FWHM', 'PSF_CUBE', 'OBJ_XY', 'FOC_XY']
         # we need to give the shapes of each array to self.run_analysis
-        results_shapes = [(3, 3), (3, N_points, N_points), (3, 2), (3, 2)]
+        results_shapes = [(3,), (N_points, N_points), (2,), (2,)]
 
-        # We need to know how many rays are inside the pupil
-        px = np.linspace(-1, 1, N_rays, endpoint=True)
-        pxx, pyy = np.meshgrid(px, px)
-        pupil_mask = np.sqrt(pxx ** 2 + pyy ** 2) <= 1.0
-        px, py = pxx[pupil_mask], pyy[pupil_mask]
-        # How many rays are actually inside the pupil aperture?
-        N_rays_inside = px.shape[0]
+        # # We need to know how many rays are inside the pupil
+        # px = np.linspace(-1, 1, N_rays, endpoint=True)
+        # pxx, pyy = np.meshgrid(px, px)
+        # pupil_mask = np.sqrt(pxx ** 2 + pyy ** 2) <= 1.0
+        # px, py = pxx[pupil_mask], pyy[pupil_mask]
+        # # How many rays are actually inside the pupil aperture?
+        # N_rays_inside = px.shape[0]
+
+        px, py = define_pupil_sampling(r_obsc=0.2841, N_rays=N_rays, mode='random')
+        print("Using %d rays" % N_rays)
 
         metadata = {}
-        metadata['N_rays Pupil'] = N_rays_inside
+        metadata['N_rays Pupil'] = N_rays
         metadata['Configurations'] = 'All' if configuration_idx is None else configuration_idx
         metadata['Wavelengths'] = 'All' if wavelength_idx is None else wavelength_idx
         metadata['N_points PSF'] = N_points
@@ -2166,7 +2214,7 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
                                              files_dir=files_dir,zemax_file=zemax_file, results_path=results_path,
                                              results_shapes=results_shapes, results_names=results_names,
                                              wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
-                                             surface=surface, N_rays=N_rays, N_points=N_points, PSF_window=PSF_window)
+                                             surface=surface, px=px, py=py, N_points=N_points, PSF_window=PSF_window)
 
 
             geo_fwhm, psf_cube, obj_xy, foc_xy, wavelengths = list_results
