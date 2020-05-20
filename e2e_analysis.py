@@ -200,6 +200,21 @@ def pixelate_crosstalk_psf(raw_psf, PSF_window, N_points, xt=0.02):
     return cross_psf
 
 
+import functools
+
+MAX_WAVES = 23
+@functools.lru_cache(maxsize=MAX_WAVES)
+def airy(wavelength):
+    print('Recalculating Airy Pattern for %.3f microns' % wavelength)
+    x = np.zeros((3, 3))
+    return x
+
+
+def add_difraction(psf_geo, wavelength):
+
+    # Get Airy pattern
+    a = airy(wavelength)
+    return
 
 
 
@@ -1925,7 +1940,7 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
         """
 
         # We want the result to produce as output: the RMS WFE array, and the RayTrace at both Object and Focal plane
-        results_names = ['EE_WFE', 'OBJ_XY', 'SLI_XY', 'DET_XY']
+        results_names = ['EE', 'OBJ_XY', 'SLI_XY', 'DET_XY']
         # we need to give the shapes of each array to self.run_analysis
         results_shapes = [(1,), (2,), (2,), (2,)]
 
@@ -2088,20 +2103,27 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
         xy_grid = np.vstack([xx_grid.ravel(), yy_grid.ravel()]).T
         log_scores = kde.score_samples(xy_grid)
 
-        psf = np.exp(log_scores)
-        psf /= np.max(psf)
-        psf = psf.reshape(xx_grid.shape)
+        psf_geo = np.exp(log_scores)
+        psf_geo /= np.max(psf_geo)
+        psf_geo = psf_geo.reshape(xx_grid.shape)
 
-        cross_psf = pixelate_crosstalk_psf(psf, PSF_window, N_points)
-        PSF_cube[:, :] = cross_psf
-        N_cross = cross_psf.shape[0]
+        # Up to here the PSF is Geometric (just tracing rays)
+        # Nowe we add various diffraction effects
 
-        x_cross = np.linspace(xmin, xmax, N_cross)
-        y_cross = np.linspace(ymin, ymax, N_cross)
-        xx_cross, yy_cross = np.meshgrid(x_cross, y_cross)
+        wavelength = system.SystemData.Wavelengths.GetWavelength(wave_idx).Wavelength
+        psf_diffr = add_difraction(psf_geo, wavelength)
+
+
+        # cross_psf = pixelate_crosstalk_psf(psf, PSF_window, N_points)
+        # PSF_cube[:, :] = cross_psf
+        # N_cross = cross_psf.shape[0]
+        #
+        # x_cross = np.linspace(xmin, xmax, N_cross)
+        # y_cross = np.linspace(ymin, ymax, N_cross)
+        # xx_cross, yy_cross = np.meshgrid(x_cross, y_cross)
 
         # Fit the PSF to a 2D Gaussian
-        sigmaX, sigmaY, theta = fit_gaussian(xx=xx_cross, yy=yy_cross, data=cross_psf, x0=cent_x, y0=cent_y)
+        sigmaX, sigmaY, theta = fit_gaussian(xx=xx_grid, yy=yy_grid, data=psf_geo, x0=cent_x, y0=cent_y)
 
         fwhm_x = 2 * np.sqrt(2 * np.log(2)) * sigmaX * 1000
         # fwhm_x_cross = 2 * np.sqrt(2 * np.log(2)) * sigmaX_cross * 1000
@@ -2190,6 +2212,9 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
         # print(settings)
 
         for zemax_file, settings in zip(file_list, sett_list):
+
+            # Clear the Cache for the Airy Pattern function
+            airy.cache_clear()
 
             list_results = self.run_analysis(analysis_function=self.analysis_function_geofwhm_psf,
                                              files_dir=files_dir,zemax_file=zemax_file, results_path=results_path,

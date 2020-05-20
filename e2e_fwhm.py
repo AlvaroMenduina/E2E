@@ -32,7 +32,7 @@ def stich_fwhm_detector(zosapi, spaxel_scale, grating):
                    'grating': [grating]}
         focal_plane = e2e.focal_planes['IFS'][spaxel_scale][ifu_section]['DET']
 
-        wavelength_idx = np.linspace(1, 23, 5).astype(int)
+        wavelength_idx = np.linspace(1, 23, 3).astype(int)
         list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options, results_path=results_path,
                                                 wavelength_idx=wavelength_idx, configuration_idx=None, surface=focal_plane,
                                                 N_rays=1000)

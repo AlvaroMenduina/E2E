@@ -69,7 +69,7 @@ def detector_ensquared_energy(zosapi, spaxel_scale, grating, N_rays, files_path,
         ax.set_ylabel(axis_label + r' Y [mm]')
         ax.set_aspect('equal')
         plt.colorbar(tpc_odd, ax=ax, orientation='horizontal')
-        title = r'IFU-%s | %s mas | %s SPEC' % (ifu, spaxel_scale, grating)
+        title = r'IFU-%s | %s mas | %s SPEC | EE min:%.2f max:%.2f' % (ifu, spaxel_scale, grating, min_ener, max_ener)
         ax.set_title(title)
 
     fig_name = "ENSQUARED_ENERGY_DETECTOR_PO%s_SPEC_%s" % (spaxel_scale, grating)
@@ -92,7 +92,7 @@ if __name__ == """__main__""":
     files_path = os.path.abspath("D:\End to End Model\April_2020")
     results_path = os.path.abspath("D:\End to End Model\Results_April")
 
-    spaxel_scale = '4x4'
+    spaxel_scale = '20x20'
     gratings = ['Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
     # gratings = ['H']
     N_rays = 1000
