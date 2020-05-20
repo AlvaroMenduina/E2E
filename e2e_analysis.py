@@ -146,7 +146,7 @@ class PythonStandaloneApplication(object):
 
 from scipy.optimize import curve_fit
 
-def twoD_Gaussian(data_tuple, x0, y0, sigma_x, sigma_y, theta, amplitude):
+def twoD_Gaussian(data_tuple, x0, y0, sigma_x, sigma_y, theta, amplitude, offset):
     # Asymmetric 2d Gaussian
     (x, y) = data_tuple
     x0 = float(x0)
@@ -154,17 +154,17 @@ def twoD_Gaussian(data_tuple, x0, y0, sigma_x, sigma_y, theta, amplitude):
     a = (np.cos(theta)**2)/(2*sigma_x**2) + (np.sin(theta)**2)/(2*sigma_y**2)
     b = -(np.sin(2*theta))/(4*sigma_x**2) + (np.sin(2*theta))/(4*sigma_y**2)
     c = (np.sin(theta)**2)/(2*sigma_x**2) + (np.cos(theta)**2)/(2*sigma_y**2)
-    g = amplitude * np.exp(-(a*((x-x0)**2) + 2*b*(x-x0)*(y-y0) + c*((y-y0)**2)))
+    g = offset + amplitude * np.exp(-(a*((x-x0)**2) + 2*b*(x-x0)*(y-y0) + c*((y-y0)**2)))
     return g
 
 def fit_gaussian(xx, yy, data, x0, y0):
 
     # peak, offset = 1.0, 0.0
-    sigmax0, sigmay0 = 0.010, 0.010     # 10 microns
+    sigmax0, sigmay0 = 0.015, 0.015     # 10 microns
     rotation0 = 0.0
-    init = [x0, y0, sigmax0, sigmay0, rotation0, 0.0]  # first guess of 1.0 for sigma
-    bounds = ([-np.inf, -np.inf, 0.0, 0.0, -np.pi/2, -np.inf],
-              [np.inf, np.inf, np.inf, np.inf, np.pi/2, np.inf])
+    init = [x0, y0, sigmax0, sigmay0, rotation0, 0.0, 0.0]  # first guess of 1.0 for sigma
+    bounds = ([-np.inf, -np.inf, 0.0, 0.0, -np.pi/2, -np.inf, -np.inf],
+              [np.inf, np.inf, np.inf, np.inf, np.pi/2, np.inf, np.inf])
 
     try:
         pars, cov = curve_fit(twoD_Gaussian, (xx.ravel(), yy.ravel()), data.ravel(), p0=init, bounds=bounds)
@@ -1805,6 +1805,7 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
         rays_detector.StartReadingResults()
         checksum_detector = 0
         index_valid_detector = []
+        vignetted = []
         for i in range(N_rays):
             output = rays_detector.ReadNextResult()
             if output[2] == 0 and output[3] == 0:       # ErrorCode & VignetteCode
@@ -1812,11 +1813,18 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
                 detector_xy[i, 1] = output[5]
                 checksum_detector += 1
                 index_valid_detector.append(i)
-            else:
-                # Some rays are lost
+            elif output[2] == 0 and output[3] != 0:
+                # Some rays are vignetted
                 error_code = output[2]
                 vignette_code = output[3]
+                vignetted.append([output[4],  output[5]])
+                detector_xy[i, 0] = output[4]
+                detector_xy[i, 1] = output[5]
+                checksum_detector += 1
+                index_valid_detector.append(i)
+
                 # print("\nError Code: %d | Vignette Code: %d" % (error_code, vignette_code))
+        vignetted = np.array(vignetted)
         # if checksum_detector < N_rays:
         #     print('Some rays were lost after the Image Slicer: ', checksum_detector)
         #
@@ -1848,52 +1856,53 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
             print(config, wave_idx)
             raise ValueError("Ensquared Energy is larger than 1.0")
 
-
-        print("\nRays Traced: ", N_rays)
-        print("Make it to the Image Slicer: %d / %d" % (checksum_slicer, N_rays))
-        print("Inside 2 slice box: %d / %d" % (total_slicer, N_rays))
-        print("Make it to the Detector: %d / %d" % (checksum_detector, N_rays))
-        print("Inside 2 pixel box: %d / %d" % (total_detector, checksum_detector))
-        print("Ensquared Energy: %.3f" % EE)
-
-
-        if config in [1, 2, 3] and wave_idx == 1:
-
-            print("\nTracing %d rays to calculate Ensquared Energy" % (N_rays))
-            fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
-            ax1.scatter(px, py, s=5, color='red')
-            ax1.scatter(px[valid_both], py[valid_both], s=5, color='lime')
-            ax1.set_xlabel(r'$P_x$')
-            ax1.set_ylabel(r'$P_y$')
-            ax1.set_xlim([-1, 1])
-            ax1.set_ylim([-1, 1])
-            ax1.set_title(r'Pupil Plane | %s rays' % N_rays)
-            ax1.set_aspect('equal')
-
-            sx, sy = slicer_xy[:, 0], slicer_xy[:, 1]
-            scx, scy = np.mean(sx), np.mean(sy)
-            ax2.scatter(sx, sy, s=3, color='red')
-            ax2.scatter(sx[valid_both], sy[valid_both], s=3, color='blue')
-            # ax2.scatter(scx, scy, s=8, color='red')
-            ax2.axhline(y=scy + 0.5, color='black', linestyle='--')
-            ax2.axhline(y=scy - 0.5, color='black', linestyle='--')
-            ax2.set_xlabel(r'Slicer X [mm]')
-            ax2.set_ylabel(r'Slicer Y [mm]')
-            ax2.set_xlim([scx - 1, scx + 1])
-            ax2.set_ylim([scy - 1, scy + 1])
-            ax2.set_title(r'Image Slicer | $\pm$0.5 mm wrt Centroid')
-            ax2.set_aspect('equal')
-
-            ax3.scatter(valid_det_x, valid_det_y, s=3, color='green')
-            ax3.axvline(x=sdx + det_pix, color='black', linestyle='--')
-            ax3.axvline(x=sdx - det_pix, color='black', linestyle='--')
-            ax3.set_xlabel(r'Detector X [mm]')
-            ax3.set_ylabel(r'Detector Y [mm]')
-            ax3.set_xlim([sdx - 2*det_pix, sdx + 2*det_pix])
-            ax3.set_ylim([sdy - 2*det_pix, sdy + 2*det_pix])
-            ax3.set_title(r'Detector Plane | $\pm$15 $\mu$m wrt Centroid')
-            ax3.set_aspect('equal')
-        plt.show()
+        #
+        # print("\nRays Traced: ", N_rays)
+        # print("Make it to the Image Slicer: %d / %d" % (checksum_slicer, N_rays))
+        # print("Inside 2 slice box: %d / %d" % (total_slicer, N_rays))
+        # print("Make it to the Detector: %d / %d" % (checksum_detector, N_rays))
+        # print("Inside 2 pixel box: %d / %d" % (total_detector, checksum_detector))
+        # print("Ensquared Energy: %.3f" % EE)
+        #
+        #
+        # if config in [1, 2, 3, 4, 5, 6] and wave_idx in [1, 2, 3, 4, 5]:
+        #
+        #     print("\nTracing %d rays to calculate Ensquared Energy" % (N_rays))
+        #     fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
+        #     ax1.scatter(px, py, s=5, color='red')
+        #     ax1.scatter(px[valid_both], py[valid_both], s=5, color='lime')
+        #     ax1.set_xlabel(r'$P_x$')
+        #     ax1.set_ylabel(r'$P_y$')
+        #     ax1.set_xlim([-1, 1])
+        #     ax1.set_ylim([-1, 1])
+        #     ax1.set_title(r'Pupil Plane | %s rays' % N_rays)
+        #     ax1.set_aspect('equal')
+        #
+        #     sx, sy = slicer_xy[:, 0], slicer_xy[:, 1]
+        #     scx, scy = np.mean(sx), np.mean(sy)
+        #     ax2.scatter(sx, sy, s=3, color='red')
+        #     ax2.scatter(sx[valid_both], sy[valid_both], s=3, color='blue')
+        #     # ax2.scatter(scx, scy, s=8, color='red')
+        #     ax2.axhline(y=scy + 1.0, color='black', linestyle='--')
+        #     ax2.axhline(y=scy - 1.0, color='black', linestyle='--')
+        #     ax2.set_xlabel(r'Slicer X [mm]')
+        #     ax2.set_ylabel(r'Slicer Y [mm]')
+        #     ax2.set_xlim([scx - 2, scx + 2])
+        #     ax2.set_ylim([scy - 2, scy + 2])
+        #     ax2.set_title(r'Image Slicer | $\pm$1.0 mm wrt Centroid')
+        #     ax2.set_aspect('equal')
+        #
+        #     ax3.scatter(valid_det_x, valid_det_y, s=3, color='green')
+        #     ax3.scatter(vignetted[:, 0], vignetted[:, 1], s=3, color='orange')
+        #     ax3.axvline(x=sdx + det_pix, color='black', linestyle='--')
+        #     ax3.axvline(x=sdx - det_pix, color='black', linestyle='--')
+        #     ax3.set_xlabel(r'Detector X [mm]')
+        #     ax3.set_ylabel(r'Detector Y [mm]')
+        #     ax3.set_xlim([sdx - 2*det_pix, sdx + 2*det_pix])
+        #     ax3.set_ylim([sdy - 2*det_pix, sdy + 2*det_pix])
+        #     ax3.set_title(r'Detector Plane | $\pm$15 $\mu$m wrt Centroid')
+        #     ax3.set_aspect('equal')
+        # plt.show()
 
 
         return [EE, obj_xy, [scx, scy], [sdx, sdy]]
@@ -2021,145 +2030,117 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
 
         N_rays = px.shape[0]
 
-        XY = np.empty((N_rays, 2))     # Rays inside plus 1 for the chief ray extra
-
-        FWHM = np.zeros((N_fields, 3))          # [mean_radius, m_radiusX, m_radiusY]
-        obj_xy = np.zeros((N_fields, 2))        # (fx, fy) coordinates
-        foc_xy = np.empty((N_fields, 2))        # raytrace results of the Centroid
+        XY = np.empty((N_rays, 2))
+        FWHM = np.zeros((3))          # [mean_radius, m_radiusX, m_radiusY]
+        obj_xy = np.zeros((2))        # (fx, fy) coordinates for the chief ray
+        foc_xy = np.empty((2))        # raytrace results of the Centroid
         N = int(PSF_window / 15)
-        PSF_cube = np.empty((N_fields, N, N))
+        PSF_cube = np.empty((N, N))
 
         if config == 1:
             print("\nTracing %d rays to calculate FWHM PSF" % (N_rays))
 
-        # fig, axes = plt.subplots(1, N_fields)
+        fx, fy = sysField.GetField(2).X, sysField.GetField(2).Y
+        hx, hy = fx / r_max, fy / r_max      # Normalized field coordinates (hx, hy)
+        obj_xy[:] = [fx, fy]
 
-        # Loop over each Field computing the Spot Diagram
-        for j in [0]:
+        raytrace = system.Tools.OpenBatchRayTrace()
+        normUnPolData = raytrace.CreateNormUnpol(N_rays, constants.RaysType_Real, surface)
 
-            # fx, fy = sysField.GetField(j + 1).X, sysField.GetField(j + 1).Y
-            fx, fy = sysField.GetField(2).X, sysField.GetField(2).Y
-            hx, hy = fx / r_max, fy / r_max      # Normalized field coordinates (hx, hy)
+        for (p_x, p_y) in zip(px, py):
+            normUnPolData.AddRay(wave_idx, hx, hy, p_x, p_y, constants.OPDMode_None)
 
-            obj_xy[j, :] = [fx, fy]
+        CastTo(raytrace, 'ISystemTool').RunAndWaitForCompletion()
+        normUnPolData.StartReadingResults()
+        for i in range(N_rays):
+            output = normUnPolData.ReadNextResult()
+            if output[2] == 0 and output[3] == 0:
+                XY[i, 0] = output[4]
+                XY[i, 1] = output[5]
 
-            raytrace = system.Tools.OpenBatchRayTrace()
-            # remember to specify the surface to which you are tracing!
-            normUnPolData = raytrace.CreateNormUnpol(N_rays, constants.RaysType_Real, surface)
+        normUnPolData.ClearData()
+        CastTo(raytrace, 'ISystemTool').Close()
 
-            # Add the Chief Ray
-            # normUnPolData.AddRay(wave_idx, hx, hy, 0.0, 0.0, constants.OPDMode_None)
+        # Calculate the FWHM
+        x, y = XY[:, 0], XY[:, 1]
+        cent_x, cent_y = np.mean(x), np.mean(y)
+        foc_xy[:] = [cent_x, cent_y]
 
-            for (p_x, p_y) in zip(px, py):
-                # Add the ray to the RayTrace
-                normUnPolData.AddRay(wave_idx, hx, hy, p_x, p_y, constants.OPDMode_None)
+        # Select what point will be used as Reference for the FWHM
+        if reference == "Centroid":
+            ref_x, ref_y = cent_x, cent_y
+        else:
+            raise ValueError("reference should be 'ChiefRay' or 'Centroid'")
 
-            # Run the RayTrace for the whole Slice
-            CastTo(raytrace, 'ISystemTool').RunAndWaitForCompletion()
-            normUnPolData.StartReadingResults()
-            for i in range(N_rays):
-                output = normUnPolData.ReadNextResult()
-                if output[2] == 0 and output[3] == 0:
-                    XY[j, i, 0] = output[4]
-                    XY[j, i, 1] = output[5]
+        std_x, std_y = np.std(x), np.std(y)
+        std = max(std_x, std_y)
+        bandwidth = min(std_x, std_y)
+        kde = KernelDensity(kernel='gaussian', bandwidth=bandwidth).fit(XY)
 
-            normUnPolData.ClearData()
-            CastTo(raytrace, 'ISystemTool').Close()
+        # define a grid to compute the PSF
+        # xmin, xmax = cent_x - 3 * std, cent_x + 3 * std
+        # ymin, ymax = cent_y - 3 * std, cent_y + 3 * std
+        xmin, xmax = cent_x - PSF_window/2/1000 + 7.5 / 1000, cent_x + PSF_window/2/1000 + 7.5 / 1000
+        ymin, ymax = cent_y - PSF_window/2/1000 + 7.5 / 1000, cent_y + PSF_window/2/1000 + 7.5 / 1000
+        x_grid = np.linspace(xmin, xmax, N_points)
+        y_grid = np.linspace(ymin, ymax, N_points)
+        xx_grid, yy_grid = np.meshgrid(x_grid, y_grid)
+        xy_grid = np.vstack([xx_grid.ravel(), yy_grid.ravel()]).T
+        log_scores = kde.score_samples(xy_grid)
 
-            # Calculate the contours
-            x, y = XY[j, :, 0], XY[j, :, 1]
-            xy = XY[j]
+        psf = np.exp(log_scores)
+        psf /= np.max(psf)
+        psf = psf.reshape(xx_grid.shape)
 
-            chief_x, chief_y = x[0], y[0]           # We added the Chief Ray first to the BatchTrace
-            cent_x, cent_y = np.mean(x), np.mean(y)
+        cross_psf = pixelate_crosstalk_psf(psf, PSF_window, N_points)
+        PSF_cube[:, :] = cross_psf
+        N_cross = cross_psf.shape[0]
 
-            # Select what point will be used as Reference for the FWHM
-            if reference == "Centroid":
-                ref_x, ref_y = cent_x, cent_y
-            elif reference == "ChiefRay":
-                ref_x, ref_y = chief_x, chief_y
-            else:
-                raise ValueError("reference should be 'ChiefRay' or 'Centroid'")
+        x_cross = np.linspace(xmin, xmax, N_cross)
+        y_cross = np.linspace(ymin, ymax, N_cross)
+        xx_cross, yy_cross = np.meshgrid(x_cross, y_cross)
 
-            # Add the Reference Point to the Focal Plane Raytrace results
-            foc_xy[j, :] = [ref_x, ref_y]
+        # Fit the PSF to a 2D Gaussian
+        sigmaX, sigmaY, theta = fit_gaussian(xx=xx_cross, yy=yy_cross, data=cross_psf, x0=cent_x, y0=cent_y)
 
-            # KDE with scikit
-            std_x, std_y = np.std(x), np.std(y)
-            std = max(std_x, std_y)
-            bandwidth = min(std_x, std_y)
+        fwhm_x = 2 * np.sqrt(2 * np.log(2)) * sigmaX * 1000
+        # fwhm_x_cross = 2 * np.sqrt(2 * np.log(2)) * sigmaX_cross * 1000
+        fwhm_y = 2 * np.sqrt(2 * np.log(2)) * sigmaY * 1000
+        # fwhm_y_cross = 2 * np.sqrt(2 * np.log(2)) * sigmaY_cross * 1000
 
-            kde = KernelDensity(kernel='gaussian', bandwidth=0.75*bandwidth).fit(xy)
+        # if fwhm_x < 5 or fwhm_y < 5:
+        #     print("FWHM_x: %.1f | FWHM_y: %.1f | Theta: %.1f" % (fwhm_x, fwhm_y, np.rad2deg(theta)))
+        # # print("FWHM_x: %.1f | FWHM_y: %.1f | Theta: %.1f" % (fwhm_x_cross, fwhm_y_cross, np.rad2deg(theta_cross)))
+        #
+        #
+        #
+        #     fig, (ax1, ax2, ax3, ax4) = plt.subplots(1, 4)
+        #     img1 = ax1.imshow(psf, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
+        #     ax1.scatter(x, y, s=3, color='black', alpha=0.5)
+        #     plt.colorbar(img1, ax=ax1, orientation='horizontal')
+        #     ax1.set_title('Ray Data')
+        #
+        #     img2 = ax2.imshow(cross_psf, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
+        #     plt.colorbar(img2, ax=ax2, orientation='horizontal')
+        #     ax2.set_title(r'Pixelation + Crosstalk')
+        #
+        #     # img3 = ax3.imshow(cross_psf, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
+        #     # plt.colorbar(img3, ax=ax3, orientation='horizontal')
+        #     #
+        #     fit = twoD_Gaussian(data_tuple=(xx_grid, yy_grid), x0=cent_x, y0=cent_y, sigma_x=sigmaX, sigma_y=sigmaY,
+        #                         theta=theta, amplitude=1.0, offset=0.0)
+        #     img3 = ax3.imshow(fit, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
+        #     plt.colorbar(img3, ax=ax3, orientation='horizontal')
+        #     ax3.set_title(r'Guassian Fit (High Res)')
+        #
+        #     fit = twoD_Gaussian(data_tuple=(xx_cross, yy_cross), x0=cent_x, y0=cent_y, sigma_x=sigmaX, sigma_y=sigmaY,
+        #                         theta=theta, amplitude=1.0, offset=0.0)
+        #     img4 = ax4.imshow(fit, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
+        #     ax4.set_title(r'Guassian Fit (Pixelated)')
+        #     plt.colorbar(img4, ax=ax4, orientation='horizontal')
 
-            # define a grid to compute the PSF
-            # xmin, xmax = cent_x - 3 * std, cent_x + 3 * std
-            # ymin, ymax = cent_y - 3 * std, cent_y + 3 * std
-            xmin, xmax = cent_x - PSF_window/2/1000 + 7.5 / 1000, cent_x + PSF_window/2/1000 + 7.5 / 1000
-            ymin, ymax = cent_y - PSF_window/2/1000 + 7.5 / 1000, cent_y + PSF_window/2/1000 + 7.5 / 1000
-            x_grid = np.linspace(xmin, xmax, N_points)
-            y_grid = np.linspace(ymin, ymax, N_points)
-            xx_grid, yy_grid = np.meshgrid(x_grid, y_grid)
-            xy_grid = np.vstack([xx_grid.ravel(), yy_grid.ravel()]).T
-            # print(xy_grid.shape)
-            log_scores = kde.score_samples(xy_grid)
 
-            psf = np.exp(log_scores)
-            psf /= np.max(psf)
-            psf = psf.reshape(xx_grid.shape)
-
-            cross_psf = pixelate_crosstalk_psf(psf, PSF_window, N_points)
-            N_cross = cross_psf.shape[0]
-
-            x_cross = np.linspace(xmin, xmax, N_cross)
-            y_cross = np.linspace(ymin, ymax, N_cross)
-            xx_cross, yy_cross = np.meshgrid(x_cross, y_cross)
-
-            # Fit the PSF to a 2D Gaussian
-            sigmaX, sigmaY, theta = fit_gaussian(xx=xx_cross, yy=yy_cross, data=cross_psf, x0=cent_x, y0=cent_y)
-            # sigmaX_cross, sigmaY_cross, theta_cross = fit_gaussian(xx=xx_cross, yy=yy_cross, data=cross_psf, x0=cent_x, y0=cent_y)
-            fwhm_x = 2 * np.sqrt(2 * np.log(2)) * sigmaX * 1000
-            # fwhm_x_cross = 2 * np.sqrt(2 * np.log(2)) * sigmaX_cross * 1000
-            fwhm_y = 2 * np.sqrt(2 * np.log(2)) * sigmaY * 1000
-            # fwhm_y_cross = 2 * np.sqrt(2 * np.log(2)) * sigmaY_cross * 1000
-
-            # print("\nFWHM_x: %.1f | FWHM_y: %.1f | Theta: %.1f" % (fwhm_x, fwhm_y, np.rad2deg(theta)))
-            # print("FWHM_x: %.1f | FWHM_y: %.1f | Theta: %.1f" % (fwhm_x_cross, fwhm_y_cross, np.rad2deg(theta_cross)))
-            #
-            # fig, (ax1, ax2, ax3, ax4) = plt.subplots(1, 4)
-            # img1 = ax1.imshow(psf, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
-            # ax1.scatter(x, y, s=3, color='black', alpha=0.5)
-            # plt.colorbar(img1, ax=ax1, orientation='horizontal')
-            # ax1.set_title('Ray Data')
-            #
-            # img2 = ax2.imshow(cross_psf, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
-            # plt.colorbar(img2, ax=ax2, orientation='horizontal')
-            # ax2.set_title(r'Pixelation + Crosstalk')
-            #
-            # # img3 = ax3.imshow(cross_psf, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
-            # # plt.colorbar(img3, ax=ax3, orientation='horizontal')
-            # #
-            # fit = twoD_Gaussian(data_tuple=(xx_grid, yy_grid), x0=cent_x, y0=cent_y, sigma_x=sigmaX_cross, sigma_y=sigmaY_cross,
-            #                     theta=theta_cross, amplitude=1.0)
-            # img3 = ax3.imshow(fit, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
-            # plt.colorbar(img3, ax=ax3, orientation='horizontal')
-            # ax3.set_title(r'Guassian Fit (High Res)')
-            #
-            # fit = twoD_Gaussian(data_tuple=(xx_cross, yy_cross), x0=cent_x, y0=cent_y, sigma_x=sigmaX_cross, sigma_y=sigmaY_cross,
-            #                     theta=theta_cross, amplitude=1.0)
-            # img4 = ax4.imshow(fit, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
-            # ax4.set_title(r'Guassian Fit (Pixelated)')
-            # plt.colorbar(img4, ax=ax4, orientation='horizontal')
-
-            # PSF_cube[j] = psf
-            #
-            # ax = axes[j]
-            # img = ax.imshow(psf, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
-            # # ax.scatter(x, y, s=3, color='black', alpha=0.5)
-            # plt.colorbar(img, ax=ax, orientation='horizontal')
-            # ax.set_xlim([xmin, xmax])
-            # ax.set_ylim([ymin, ymax])
-
-            FWHM[j, :] = [fwhm_x, fwhm_y, theta]        # Store the results
+        FWHM[:] = [fwhm_x, fwhm_y, theta]        # Store the results
 
         plt.show()
         #
@@ -2183,7 +2164,7 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
         # We want the result to produce as output: the RMS WFE array, and the RayTrace at both Object and Focal plane
         results_names = ['GEO_FWHM', 'PSF_CUBE', 'OBJ_XY', 'FOC_XY']
         # we need to give the shapes of each array to self.run_analysis
-        results_shapes = [(3,), (N_points, N_points), (2,), (2,)]
+        results_shapes = [(3,), (PSF_window//15, PSF_window//15), (2,), (2,)]
 
         # # We need to know how many rays are inside the pupil
         # px = np.linspace(-1, 1, N_rays, endpoint=True)

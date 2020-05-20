@@ -1,4 +1,5 @@
 """
+
 Ensquared Energy analysis
 
 
@@ -13,7 +14,20 @@ import e2e_analysis as e2e
 import matplotlib.pyplot as plt
 import matplotlib.tri as tri
 
-def stitch_ensquare_energy(zosapi, spaxel_scale, grating, N_rays, files_path, results_path):
+def detector_ensquared_energy(zosapi, spaxel_scale, grating, N_rays, files_path, results_path):
+    """
+    Calculate the Ensquared Energy at the detector plane for all 4 IFU channels
+    The Ensquared Energy is calculated for the Field Point at the centre of the slice
+    for all slices and all wavelengths
+
+    :param zosapi: the Python Standalone Application
+    :param spaxel_scale: str, spaxel scale to analyze
+    :param grating: str, grating to use
+    :param N_rays: number of rays to sample the pupil with
+    :param files_path: path to the Zemax E2E model files
+    :param results_path: path to save the results
+    :return:
+    """
 
     analysis = e2e.EnsquaredEnergyAnalysis(zosapi=zosapi)
 
@@ -27,7 +41,7 @@ def stitch_ensquare_energy(zosapi, spaxel_scale, grating, N_rays, files_path, re
 
         energy, obj_xy, slicer_xy, detector_xy, wavelengths = list_results[0]
 
-
+        # Separate the Odd / Even configurations to avoid triangulating over the gap on the detector plane
         ener_ogg, ener_even = energy[:, ::2].flatten(), energy[:, 1::2].flatten()
         x, y = detector_xy[:, :, 0].flatten(), detector_xy[:, :, 1].flatten()
         x_odd, y_odd = detector_xy[:, ::2, 0].flatten(), detector_xy[:, ::2, 1].flatten()
@@ -44,11 +58,10 @@ def stitch_ensquare_energy(zosapi, spaxel_scale, grating, N_rays, files_path, re
 
         min_ener, max_ener = np.min(energy), np.max(energy)
 
-        # fig, ax = plt.subplots(1, 1)
         ax = axes.flatten()[i]
-        tpc_odd = ax.tripcolor(triang_odd, ener_ogg, shading='flat', cmap='Blues')
+        tpc_odd = ax.tripcolor(triang_odd, ener_ogg, shading='flat', cmap='Blues', vmin=min_ener, vmax=1.0)
         tpc_odd.set_clim(vmin=min_ener, vmax=1.0)
-        tpc_even = ax.tripcolor(triang_even, ener_even, shading='flat', cmap='Blues')
+        tpc_even = ax.tripcolor(triang_even, ener_even, shading='flat', cmap='Blues', vmin=min_ener, vmax=1.0)
         tpc_even.set_clim(vmin=min_ener, vmax=1.0)
         ax.scatter(x, y, s=2, color='black')
         axis_label = 'Detector'
@@ -80,12 +93,12 @@ if __name__ == """__main__""":
     results_path = os.path.abspath("D:\End to End Model\Results_April")
 
     spaxel_scale = '4x4'
-    # gratings = ['Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
-    gratings = ['H']
+    gratings = ['Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
+    # gratings = ['H']
     N_rays = 1000
 
     for grating in gratings:
-        stitch_ensquare_energy(zosapi=psa, spaxel_scale=spaxel_scale, grating=grating, N_rays=N_rays,
+        detector_ensquared_energy(zosapi=psa, spaxel_scale=spaxel_scale, grating=grating, N_rays=N_rays,
                                files_path=files_path, results_path=results_path)
 
     # Some info on speed and number of rays:

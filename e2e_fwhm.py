@@ -35,16 +35,16 @@ def stich_fwhm_detector(zosapi, spaxel_scale, grating):
         wavelength_idx = np.linspace(1, 23, 5).astype(int)
         list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options, results_path=results_path,
                                                 wavelength_idx=wavelength_idx, configuration_idx=None, surface=focal_plane,
-                                                N_rays=500)
+                                                N_rays=1000)
 
         fwhm, psf_cube, obj_xy, foc_xy, wavelengths = list_results
         print("Max FWHM: %.1f" % np.nanmax(fwhm))
         focal_coord.append(foc_xy)
 
-        fx_waves.append(fwhm[:, :, :, 0])
-        fy_waves.append(fwhm[:, :, :, 1])
+        fx_waves.append(fwhm[:, :, 0])
+        fy_waves.append(fwhm[:, :, 1])
 
-        fwhm_x, fwhm_y = fwhm[:, :, :, 0].flatten(), fwhm[:, :, :, 1].flatten()
+        fwhm_x, fwhm_y = fwhm[:, :, 0].flatten(), fwhm[:, :, 1].flatten()
         fx.append(fwhm_x)
         fy.append(fwhm_y)
 
