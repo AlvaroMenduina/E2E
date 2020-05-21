@@ -201,20 +201,52 @@ def pixelate_crosstalk_psf(raw_psf, PSF_window, N_points, xt=0.02):
 
 
 import functools
+from numpy.fft import fft2, fftshift
 
 MAX_WAVES = 23
 @functools.lru_cache(maxsize=MAX_WAVES)
-def airy(wavelength):
+def airy(wavelength, N_window):
+
     print('Recalculating Airy Pattern for %.3f microns' % wavelength)
-    x = np.zeros((3, 3))
-    return x
+
+    plate_scale = 3.3162       # mm / arcs
+    pix_sampling = 1.0        # micron at the detector plane
+    spaxel_scale = pix_sampling / plate_scale       # milliarcsec / pixel
+
+    ELT_DIAM = 39
+    MILIARCSECS_IN_A_RAD = 206265000
+    scale_rad = spaxel_scale / MILIARCSECS_IN_A_RAD
+    RHO_APER = scale_rad * ELT_DIAM / (wavelength * 1e-6)
+    RHO_OBSC = 0.30 * RHO_APER  # ELT central obscuration
+
+    SPAXEL_RAD = RHO_APER * wavelength / ELT_DIAM * 1e-6
+    SPAXEL_MAS = SPAXEL_RAD * MILIARCSECS_IN_A_RAD
+    print(SPAXEL_MAS)
+
+    N = 1024
+    x = np.linspace(-1, 1, N)
+    xx, yy = np.meshgrid(x, x)
+    rho = np.sqrt(xx**2 + yy**2)
+    print(RHO_APER)
+
+    elt_mask = (RHO_OBSC < rho) & (rho < RHO_APER)
+    pupil = elt_mask * np.exp(1j * elt_mask)
+    psf = (np.abs(fftshift(fft2(pupil, norm='ortho'))))**2
+    psf /= np.max(psf)
+
+    min_pix, max_pix = N//2 - N_window//2, N//2 + N_window//2
+    crop_psf = psf[min_pix:max_pix, min_pix:max_pix]
+
+    return crop_psf
 
 
 def add_difraction(psf_geo, wavelength):
 
-    # Get Airy pattern
-    a = airy(wavelength)
-    return
+
+    airy_pattern = airy(wavelength, N_window=psf_geo.shape[0])
+    diffr = convolve2d(psf_geo, airy_pattern, mode='same')
+
+    return diffr
 
 
 
@@ -2113,6 +2145,16 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
         wavelength = system.SystemData.Wavelengths.GetWavelength(wave_idx).Wavelength
         psf_diffr = add_difraction(psf_geo, wavelength)
 
+        # fig, (ax1, ax2) = plt.subplots(1, 2)
+        # img1 = ax1.imshow(psf_geo, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
+        # plt.colorbar(img1, ax=ax1, orientation='horizontal')
+        #
+        # img2 = ax2.imshow(psf_diffr, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
+        # plt.colorbar(img2, ax=ax2, orientation='horizontal')
+        #
+        # plt.show()
+
+
 
         # cross_psf = pixelate_crosstalk_psf(psf, PSF_window, N_points)
         # PSF_cube[:, :] = cross_psf
@@ -2123,7 +2165,7 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
         # xx_cross, yy_cross = np.meshgrid(x_cross, y_cross)
 
         # Fit the PSF to a 2D Gaussian
-        sigmaX, sigmaY, theta = fit_gaussian(xx=xx_grid, yy=yy_grid, data=psf_geo, x0=cent_x, y0=cent_y)
+        sigmaX, sigmaY, theta = fit_gaussian(xx=xx_grid, yy=yy_grid, data=psf_diffr, x0=cent_x, y0=cent_y)
 
         fwhm_x = 2 * np.sqrt(2 * np.log(2)) * sigmaX * 1000
         # fwhm_x_cross = 2 * np.sqrt(2 * np.log(2)) * sigmaX_cross * 1000
@@ -2131,7 +2173,7 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
         # fwhm_y_cross = 2 * np.sqrt(2 * np.log(2)) * sigmaY_cross * 1000
 
         # if fwhm_x < 5 or fwhm_y < 5:
-        #     print("FWHM_x: %.1f | FWHM_y: %.1f | Theta: %.1f" % (fwhm_x, fwhm_y, np.rad2deg(theta)))
+        print("FWHM_x: %.1f | FWHM_y: %.1f | Theta: %.1f" % (fwhm_x, fwhm_y, np.rad2deg(theta)))
         # # print("FWHM_x: %.1f | FWHM_y: %.1f | Theta: %.1f" % (fwhm_x_cross, fwhm_y_cross, np.rad2deg(theta_cross)))
         #
         #
