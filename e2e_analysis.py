@@ -240,10 +240,14 @@ def airy(wavelength, N_window):
     return crop_psf
 
 
-def add_difraction(psf_geo, wavelength):
+def add_diffraction(psf_geo, wavelength):
 
 
     airy_pattern = airy(wavelength, N_window=psf_geo.shape[0])
+    # plt.figure()
+    # plt.imshow(airy_pattern, cmap='bwr')
+    # plt.colorbar()
+    # plt.show()
     diffr = convolve2d(psf_geo, airy_pattern, mode='same')
 
     return diffr
@@ -2143,16 +2147,16 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
         # Nowe we add various diffraction effects
 
         wavelength = system.SystemData.Wavelengths.GetWavelength(wave_idx).Wavelength
-        psf_diffr = add_difraction(psf_geo, wavelength)
+        psf_diffr = add_diffraction(psf_geo, wavelength)
 
-        # fig, (ax1, ax2) = plt.subplots(1, 2)
-        # img1 = ax1.imshow(psf_geo, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
-        # plt.colorbar(img1, ax=ax1, orientation='horizontal')
-        #
-        # img2 = ax2.imshow(psf_diffr, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
-        # plt.colorbar(img2, ax=ax2, orientation='horizontal')
-        #
-        # plt.show()
+        fig, (ax1, ax2) = plt.subplots(1, 2)
+        img1 = ax1.imshow(psf_geo, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
+        plt.colorbar(img1, ax=ax1, orientation='horizontal')
+
+        img2 = ax2.imshow(psf_diffr, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
+        plt.colorbar(img2, ax=ax2, orientation='horizontal')
+
+        plt.show()
 
 
 
