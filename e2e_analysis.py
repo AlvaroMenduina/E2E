@@ -1902,6 +1902,9 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
         total_detector = np.sum(inside_detector)
         EE = total_detector / N_rays
 
+        # Add detector cross-talk 98%
+        EE *= 0.98
+
 
         if EE > 1.00:
             print(config, wave_idx)
