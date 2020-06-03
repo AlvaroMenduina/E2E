@@ -73,8 +73,8 @@ if __name__ == """__main__""":
     # Create a Python Standalone Application
     psa = e2e.PythonStandaloneApplication()
 
-    files_path = os.path.abspath("D:\End to End Model\April_2020")
-    results_path = os.path.abspath("D:\End to End Model\Results_April")
+    files_path = os.path.abspath("D:\End to End Model\June_2020")
+    results_path = os.path.abspath("D:\End to End Model\Results_June")
 
     scale = '60x30'
 
@@ -91,38 +91,38 @@ if __name__ == """__main__""":
 
     ### Ensquared Detector
 
-    analysis = e2e.EnsquaredDetector(zosapi=psa)
-
-    N_rays = 20
-    size = 0.25 # mm
-    surface_number = e2e.focal_planes['IFS']['60x30']['AB']['DET']
-    options = {'which_system': 'IFS', 'AO_modes': [], 'scales': ['60x30'], 'IFUs': ['AB'], 'grating': ['H']}
-    list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options,
-                                            results_path=results_path, wavelength_idx=[1],
-                                            configuration_idx=[5], surface=surface_number,
-                                            N_rays=N_rays, size=size)
-
-    obj_xy, foc_xy, global_xy, waves = list_results[0]
-
-    colors = ['black', 'red', 'blue', 'green', 'orange']
-    labels = ['low', 'right', 'top', 'left', 'mid']
-    fig, (ax1, ax2) = plt.subplots(1, 2)
-    for i in range(5):
-        ox = obj_xy[:, :, i*N_rays:(i+1)*N_rays, 0]
-        oy = obj_xy[:, :, i*N_rays:(i+1)*N_rays, 1]
-        ax1.scatter(ox, oy, label=labels[i], color=colors[i])
-        ax1.set_title(r'Object Space | Box %.f $\mu$m' % (1000 * size))
-
-
-    # fig, ax = plt.subplots(1, 1)
-    for i in range(5):
-        ox = foc_xy[:, :, i*N_rays:(i+1)*N_rays, 0]
-        oy = foc_xy[:, :, i*N_rays:(i+1)*N_rays, 1]
-        ax2.scatter(ox, oy, label=labels[i], color=colors[i])
-        ax2.set_title(r'Detector Space ')
-    plt.legend()
-
-    plt.show()
+    # analysis = e2e.EnsquaredDetector(zosapi=psa)
+    #
+    # N_rays = 20
+    # size = 0.25 # mm
+    # surface_number = e2e.focal_planes['IFS']['60x30']['AB']['DET']
+    # options = {'which_system': 'IFS', 'AO_modes': [], 'scales': ['60x30'], 'IFUs': ['AB'], 'grating': ['H']}
+    # list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options,
+    #                                         results_path=results_path, wavelength_idx=[1],
+    #                                         configuration_idx=[5], surface=surface_number,
+    #                                         N_rays=N_rays, size=size)
+    #
+    # obj_xy, foc_xy, global_xy, waves = list_results[0]
+    #
+    # colors = ['black', 'red', 'blue', 'green', 'orange']
+    # labels = ['low', 'right', 'top', 'left', 'mid']
+    # fig, (ax1, ax2) = plt.subplots(1, 2)
+    # for i in range(5):
+    #     ox = obj_xy[:, :, i*N_rays:(i+1)*N_rays, 0]
+    #     oy = obj_xy[:, :, i*N_rays:(i+1)*N_rays, 1]
+    #     ax1.scatter(ox, oy, label=labels[i], color=colors[i])
+    #     ax1.set_title(r'Object Space | Box %.f $\mu$m' % (1000 * size))
+    #
+    #
+    # # fig, ax = plt.subplots(1, 1)
+    # for i in range(5):
+    #     ox = foc_xy[:, :, i*N_rays:(i+1)*N_rays, 0]
+    #     oy = foc_xy[:, :, i*N_rays:(i+1)*N_rays, 1]
+    #     ax2.scatter(ox, oy, label=labels[i], color=colors[i])
+    #     ax2.set_title(r'Detector Space ')
+    # plt.legend()
+    #
+    # plt.show()
 
     #
     #

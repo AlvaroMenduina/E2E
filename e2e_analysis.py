@@ -37,6 +37,8 @@ det_pix = 15e-3     # Detector pixel 15 microns
 # We need to know the Zemax surface number for all Focal Planes
 # for each mode (ELT, HARMONI, IFS) and for each spaxel scale (4x4, 10x10, 20x20, 60x30)
 # for the FPRS, PO, IFU, SPEC focal planes
+
+# These are the old April-May values
 focal_planes = {}
 focal_planes['IFS'] = {'4x4': {'AB': {'FPRS': 6, 'PO': 41, 'IS': 70, 'SL': 88, 'DET': None},
                                'CD': {'FPRS': 6, 'PO': 41, 'IS': 69, 'SL': 88, 'DET': None},
@@ -54,6 +56,14 @@ focal_planes['IFS'] = {'4x4': {'AB': {'FPRS': 6, 'PO': 41, 'IS': 70, 'SL': 88, '
                                  'CD': {'FPRS': 6, 'PO': 30, 'IS': 58, 'SL': 77, 'DET': None},
                                  'EF': {'FPRS': 6, 'PO': 30, 'IS': 59, 'SL': 77, 'DET': None},
                                  'GH': {'FPRS': 6, 'PO': 30, 'IS': 58, 'SL': 77, 'DET': None}}}
+
+# focal_planes = {}
+# focal_planes['IFS'] = {'60x30': {'AB': {'PO': 31},
+#                                  'CD': {'PO': 31},
+#                                  'EF': {'PO': 31},
+#                                  'GH': {'PO': 31}}}
+
+
 # Keywords for Focal Plane are:
 # PO: PreOptics, IS: Image Slicer, SL: Slit, DET: Detector
 
