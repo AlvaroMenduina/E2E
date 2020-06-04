@@ -10,6 +10,8 @@ Using the Zemax Optics Studio (ZOS) API in Python we analyse the E2E Zemax files
 * **Adaptive Optics modes**: NOAO, SCAO, LTAO, HCAO (High Contrast)
 * **System Configurations**: Integral Field Spectrograph (IFS), full HARMONI, and complete with E-ELT
 
+The shear number of possible combinations of spaxel scales, spectral bands, type of analysis, etc, calls for an automated approach to performance analysis. This package provides such functionality
+
 Analysis implemented so far include:
 
 * **Raytracing** (general): to validate the field definitions along the optical path across all spaxel scales
