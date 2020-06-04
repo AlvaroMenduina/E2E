@@ -211,11 +211,11 @@ def pixelate_crosstalk_psf(raw_psf, PSF_window, N_points, xt=0.02):
 
 
 import functools
-from numpy.fft import fft2, fftshift
+from numpy.fft import ifft2, fft2, fftshift
 
 MAX_WAVES = 23
 @functools.lru_cache(maxsize=MAX_WAVES)
-def airy(wavelength, N_window):
+def airy(wavelength, scale_mas, N_window):
 
     print('Recalculating Airy Pattern for %.3f microns' % wavelength)
 
@@ -231,23 +231,69 @@ def airy(wavelength, N_window):
 
     SPAXEL_RAD = RHO_APER * wavelength / ELT_DIAM * 1e-6
     SPAXEL_MAS = SPAXEL_RAD * MILIARCSECS_IN_A_RAD
-    print(SPAXEL_MAS)
+    # print(SPAXEL_MAS)
 
     N = 1024
     x = np.linspace(-1, 1, N)
     xx, yy = np.meshgrid(x, x)
     rho = np.sqrt(xx**2 + yy**2)
-    print(RHO_APER)
+    # print(RHO_APER)
 
     elt_mask = (RHO_OBSC < rho) & (rho < RHO_APER)
     pupil = elt_mask * np.exp(1j * elt_mask)
-    psf = (np.abs(fftshift(fft2(pupil, norm='ortho'))))**2
+    image_electric = fftshift(fft2(pupil))
+    psf = (np.abs(image_electric))**2
     psf /= np.max(psf)
 
-    min_pix, max_pix = N//2 - N_window//2, N//2 + N_window//2
-    crop_psf = psf[min_pix:max_pix, min_pix:max_pix]
+    # min_pix, max_pix = N//2 - N_window//2, N//2 + N_window//2
+    # crop_psf = psf[min_pix:max_pix, min_pix:max_pix]
 
-    return crop_psf
+    # Add slicer effect
+    x_min, x_max = -N/2 * SPAXEL_MAS, N/2 * SPAXEL_MAS
+    x_slice = np.linspace(x_min, x_max, N, endpoint=True)
+    x_grid, y_grid = np.meshgrid(x_slice, x_slice)
+    slicer_mask = np.abs(y_grid) < scale_mas / 2
+
+    plt.figure()
+    plt.imshow(slicer_mask * psf, extent=[x_min, x_max, x_min, x_max], cmap='bwr')
+    plt.axhline(y=scale_mas/2, linestyle='--', color='black')
+    plt.axhline(y=-scale_mas/2, linestyle='--', color='black')
+    plt.xlabel(r'X [mas]')
+    plt.ylabel(r'Y [mas]')
+    plt.xlim([-15, 15])
+    plt.ylim([-15, 15])
+    plt.title(r'Airy Pattern | Slicer Mask %.1f mas' % scale_mas)
+
+    # Propagate to pupil plane
+    pup_grating = ifft2(fftshift(slicer_mask * image_electric))
+    # this time without the central obscuration
+    aperture_mask = rho < RHO_APER
+
+    # plt.figure()
+    # plt.imshow((np.abs(pup_grating)**2), cmap='bwr')
+    # plt.colorbar()
+
+    plt.figure()
+    plt.imshow(aperture_mask * (np.abs(pup_grating)**2), cmap='bwr')
+    # plt.colorbar()
+    plt.title(r'Pupil Plane | Aperture Mask')
+
+    # Back to focal plane
+    final_focal = fftshift(fft2(aperture_mask * pup_grating))
+
+    plt.figure()
+    plt.imshow((np.abs(final_focal)**2), extent=[x_min, x_max, x_min, x_max], cmap='bwr')
+    # plt.colorbar()
+    plt.xlabel(r'X [mas]')
+    plt.ylabel(r'Y [mas]')
+    plt.xlim([-15, 15])
+    plt.ylim([-15, 15])
+    plt.title(r'Focal Plane | Aperture Mask')
+
+    plt.show()
+
+    # return crop_psf
+    return
 
 
 def add_diffraction(psf_geo, wavelength):
