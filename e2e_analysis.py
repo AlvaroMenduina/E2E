@@ -1961,7 +1961,6 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
         # Add detector cross-talk 98%
         EE *= 0.98
 
-
         if EE > 1.00:
             print(config, wave_idx)
             raise ValueError("Ensquared Energy is larger than 1.0")
