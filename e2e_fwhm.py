@@ -32,7 +32,8 @@ def stich_fwhm_detector(zosapi, spaxel_scale, grating):
                    'grating': [grating]}
         focal_plane = e2e.focal_planes['IFS'][spaxel_scale][ifu_section]['DET']
 
-        wavelength_idx = np.linspace(1, 23, 3).astype(int)
+        # wavelength_idx = np.linspace(1, 23, 3).astype(int)
+        wavelength_idx = [12]
         list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options, results_path=results_path,
                                                 wavelength_idx=wavelength_idx, configuration_idx=None, surface=focal_plane,
                                                 N_rays=1000)
@@ -48,43 +49,43 @@ def stich_fwhm_detector(zosapi, spaxel_scale, grating):
         fx.append(fwhm_x)
         fy.append(fwhm_y)
 
-    # for data in [fx_waves, fy_waves]:
-    #     fig, axes = plt.subplots(2, 2, figsize=(10, 10))
-    #     # Loop over the IFU channels: AB, CD, EF, GH
-    #     for i in range(2):
-    #         for j in range(2):
-    #             k = 2 * i + j
-    #             ifu_section = ifu_sections[k]
-    #             ax = axes[i][j]
-    #             _foc_xy = focal_coord[k]
-    #             # _rms_field = rms_maps[k]
-    #
-    #             x_odd, y_odd = _foc_xy[:, ::2, :, 0].flatten(), _foc_xy[:, ::2, :, 1].flatten()
-    #             x_even, y_even = _foc_xy[:, 1::2, :, 0].flatten(), _foc_xy[:, 1::2, :, 1].flatten()
-    #             triang_odd = tri.Triangulation(x_odd, y_odd)
-    #             triang_even = tri.Triangulation(x_even, y_even)
-    #
-    #             # Remove the flat triangles at the detector edges that appear because of the field curvature
-    #             min_circle_ratio = .05
-    #             mask_odd = tri.TriAnalyzer(triang_odd).get_flat_tri_mask(min_circle_ratio)
-    #             triang_odd.set_mask(mask_odd)
-    #             mask_even = tri.TriAnalyzer(triang_even).get_flat_tri_mask(min_circle_ratio)
-    #             triang_even.set_mask(mask_even)
-    #
-    #             min_fwhm, max_fwhm = np.nanmin(data[k]), np.nanmax(data[k])
-    #
-    #             tpc_odd = ax.tripcolor(triang_odd, data[k][:, ::2].flatten(), shading='flat', cmap='jet')
-    #             tpc_odd.set_clim(vmin=min_fwhm, vmax=max_fwhm)
-    #             tpc_even = ax.tripcolor(triang_even, data[k][:, 1::2].flatten(), shading='flat', cmap='jet')
-    #             tpc_even.set_clim(vmin=min_fwhm, vmax=max_fwhm)
-    #             # ax.scatter(x, y, s=2, color='black')
-    #             axis_label = 'Detector'
-    #             ax.set_xlabel(axis_label + r' X [mm]')
-    #             ax.set_ylabel(axis_label + r' Y [mm]')
-    #             ax.set_aspect('equal')
-    #             plt.colorbar(tpc_odd, ax=ax, orientation='horizontal')
-    #
-    # # plt.show()
+    for data in [fx_waves, fy_waves]:
+        fig, axes = plt.subplots(2, 2, figsize=(10, 10))
+        # Loop over the IFU channels: AB, CD, EF, GH
+        for i in range(2):
+            for j in range(2):
+                k = 2 * i + j
+                ifu_section = ifu_sections[k]
+                ax = axes[i][j]
+                _foc_xy = focal_coord[k]
+                # _rms_field = rms_maps[k]
+
+                x_odd, y_odd = _foc_xy[:, ::2, :, 0].flatten(), _foc_xy[:, ::2, :, 1].flatten()
+                x_even, y_even = _foc_xy[:, 1::2, :, 0].flatten(), _foc_xy[:, 1::2, :, 1].flatten()
+                triang_odd = tri.Triangulation(x_odd, y_odd)
+                triang_even = tri.Triangulation(x_even, y_even)
+
+                # Remove the flat triangles at the detector edges that appear because of the field curvature
+                min_circle_ratio = .05
+                mask_odd = tri.TriAnalyzer(triang_odd).get_flat_tri_mask(min_circle_ratio)
+                triang_odd.set_mask(mask_odd)
+                mask_even = tri.TriAnalyzer(triang_even).get_flat_tri_mask(min_circle_ratio)
+                triang_even.set_mask(mask_even)
+
+                min_fwhm, max_fwhm = np.nanmin(data[k]), np.nanmax(data[k])
+
+                tpc_odd = ax.tripcolor(triang_odd, data[k][:, ::2].flatten(), shading='flat', cmap='jet')
+                tpc_odd.set_clim(vmin=min_fwhm, vmax=max_fwhm)
+                tpc_even = ax.tripcolor(triang_even, data[k][:, 1::2].flatten(), shading='flat', cmap='jet')
+                tpc_even.set_clim(vmin=min_fwhm, vmax=max_fwhm)
+                # ax.scatter(x, y, s=2, color='black')
+                axis_label = 'Detector'
+                ax.set_xlabel(axis_label + r' X [mm]')
+                ax.set_ylabel(axis_label + r' Y [mm]')
+                ax.set_aspect('equal')
+                plt.colorbar(tpc_odd, ax=ax, orientation='horizontal')
+
+    plt.show()
 
 
     max_fwhm = max(np.nanmax(fx), np.nanmax(fy))

@@ -9,6 +9,7 @@ date: March 2020
 
 import os
 import numpy as np
+from numpy.fft import ifft2, fft2, fftshift
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 import matplotlib.cm as cm
@@ -20,6 +21,8 @@ import h5py
 import datetime
 from sklearn.neighbors import KernelDensity
 from scipy.signal import convolve2d
+from scipy.optimize import curve_fit
+import functools
 
 from win32com.client.gencache import EnsureDispatch, EnsureModule
 from win32com.client import constants
@@ -154,40 +157,221 @@ class PythonStandaloneApplication(object):
         else:
             return "Invalid"
 
-from scipy.optimize import curve_fit
 
-def twoD_Gaussian(data_tuple, x0, y0, sigma_x, sigma_y, theta, amplitude, offset):
-    # Asymmetric 2d Gaussian
-    (x, y) = data_tuple
-    x0 = float(x0)
-    y0 = float(y0)
-    a = (np.cos(theta)**2)/(2*sigma_x**2) + (np.sin(theta)**2)/(2*sigma_y**2)
-    b = -(np.sin(2*theta))/(4*sigma_x**2) + (np.sin(2*theta))/(4*sigma_y**2)
-    c = (np.sin(theta)**2)/(2*sigma_x**2) + (np.cos(theta)**2)/(2*sigma_y**2)
-    g = offset + amplitude * np.exp(-(a*((x-x0)**2) + 2*b*(x-x0)*(y-y0) + c*((y-y0)**2)))
-    return g
+MAX_WAVES = 23
+@functools.lru_cache(maxsize=MAX_WAVES)
+def airy_and_slicer(wavelength, scale_mas, PSF_window, N_window):
+    """
 
-def fit_gaussian(xx, yy, data, x0, y0):
+    Since the calculations here are rather time-consuming
+    and this function will be called multiple times (once for each configuration / slice)
+    we use LRU cache to recycle previous results
 
-    # peak, offset = 1.0, 0.0
-    sigmax0, sigmay0 = 0.015, 0.015     # 10 microns
-    rotation0 = 0.0
-    init = [x0, y0, sigmax0, sigmay0, rotation0, 0.0, 0.0]  # first guess of 1.0 for sigma
-    bounds = ([-np.inf, -np.inf, 0.0, 0.0, -np.pi/2, -np.inf, -np.inf],
-              [np.inf, np.inf, np.inf, np.inf, np.pi/2, np.inf, np.inf])
+    :param wavelength: wavelength in [microns]
+    :param scale_mas: spaxel scale in [mas]
+    :param PSF_window: length of the PSF window [microns]
+    :param N_window: number of points of the PSF window [pixels]
+    :return:
+    """
 
-    try:
-        pars, cov = curve_fit(twoD_Gaussian, (xx.ravel(), yy.ravel()), data.ravel(), p0=init, bounds=bounds)
-        sigmaX, sigmaY, theta = pars[2], pars[3], pars[4]
+    # Print message to know we are updating the cache
+    print('Recalculating Airy Pattern for %.3f microns' % wavelength)
 
-    except RuntimeError:
-        # fig, ax = plt.subplots(1, 1)
-        # # img = ax.imshow(data, cmap='bwr', origin='lower')
-        # ax.scatter(x0, y0, s=3, color='black', alpha=0.5)
-        # # plt.colorbar(img, ax=ax)
-        # plt.show()
-        sigmaX, sigmaY, theta = np.nan, np.nan, np.nan
-    return sigmaX, sigmaY, theta
+    plate_scale = 3.3162  # mm / arcs
+    pix_sampling = PSF_window / N_window  # micron at the detector plane
+    spaxel_scale = pix_sampling / plate_scale  # milliarcsec / pixel
+
+    # Calculate the relative size of the pupil aperture needed to ensure the PSF is
+    # sampled with the given spaxel_scale at the detector
+    ELT_DIAM = 39
+    MILIARCSECS_IN_A_RAD = 206265000
+    scale_rad = spaxel_scale / MILIARCSECS_IN_A_RAD
+    RHO_APER = scale_rad * ELT_DIAM / (wavelength * 1e-6)
+    RHO_OBSC = 0.30 * RHO_APER  # ELT central obscuration
+
+    # Sanity check
+    SPAXEL_RAD = RHO_APER * wavelength / ELT_DIAM * 1e-6
+    SPAXEL_MAS = SPAXEL_RAD * MILIARCSECS_IN_A_RAD
+    # print(SPAXEL_MAS)
+
+    # Define the ELT pupil mask
+    N = 1024
+    x = np.linspace(-1, 1, N)
+    xx, yy = np.meshgrid(x, x)
+    rho = np.sqrt(xx ** 2 + yy ** 2)
+
+    # (1) Propagate the Image Slicer Focal plane
+    elt_mask = (RHO_OBSC < rho) & (rho < RHO_APER)
+    pupil = elt_mask * np.exp(1j * elt_mask)
+    image_electric = fftshift(fft2(pupil))
+
+    # (1.1) Add slicer effect by masking
+    # We mask the PSF covering a band of size 1x SPAXEL, depending on the scale
+    # If we have 4x4 mas, then we cover a band of 4 mas over the PSF
+    x_min, x_max = -N/2 * SPAXEL_MAS, N/2 * SPAXEL_MAS
+    x_slice = np.linspace(x_min, x_max, N, endpoint=True)
+    x_grid, y_grid = np.meshgrid(x_slice, x_slice)
+    slicer_mask = np.abs(y_grid) < scale_mas / 2
+
+    # (2) Propagate the masked electric field to Pupil Plane
+    pup_grating = ifft2(fftshift(slicer_mask * image_electric))
+    # (2.1) Add pupil mask, this time without the central obscuration
+    aperture_mask = rho < RHO_APER
+
+    # (3) Propagate back to Focal Plane
+    final_focal = fftshift(fft2(aperture_mask * pup_grating))
+    final_psf = np.abs(final_focal)**2
+    final_psf /= np.max(final_psf)
+
+    # (4) Crop the PSF to fit to the necessary window to ease the convolutions
+    min_pix, max_pix = N//2 - N_window//2, N//2 + N_window//2
+    crop_psf = final_psf[min_pix:max_pix, min_pix:max_pix]
+
+    return crop_psf
+
+
+class DifractionEffects(object):
+    """
+    A class to take care of diffraction effects
+    for the PSF FWHM calculations
+    """
+    def __init__(self):
+
+        return
+
+    def add_diffraction(self, psf_geo, PSF_window, scale_mas, wavelength):
+        """
+        Calculate the diffraction effects which include:
+            - ELT pupil diffraction
+            - Image Slicer + Grating
+
+        and convolve it with a Geometric PSF to produce an
+        estimate of the Diffraction PSF
+
+        :param psf_geo: geometric PSF
+        :param PSF_window: length of the geometric PSF window [microns]
+        :param scale_mas: spaxel scale to consider [mas]
+        :param wavelength: wavelength [microns]
+        :return:
+        """
+
+        # Calculate the diffraction effects
+        N_window = psf_geo.shape[0]
+        diffraction = airy_and_slicer(wavelength=wavelength, scale_mas=scale_mas,
+                                      PSF_window=PSF_window, N_window=N_window)
+
+        # Convolve the diffraction effects with the geometric PSF
+        psf_convol = convolve2d(psf_geo, diffraction, mode='same')
+        # Normalize to peak 1.0
+        psf_convol /= np.max(psf_convol)
+
+        return psf_convol
+
+    def gaussian2d(self, xy_data, x0, y0, sigma_x, sigma_y, theta, amplitude, offset):
+        """
+        A 2D Gaussian evaluated the points in xy_data with the following characteristics:
+        Centred at (x0, y0), with sigma_x, sigma_y, rotated by theta radians
+        with amplitude, and offset
+        :param xy_data:
+        :param x0:
+        :param y0:
+        :param sigma_x:
+        :param sigma_y:
+        :param theta:
+        :param amplitude:
+        :param offset:
+        :return:
+        """
+        (x, y) = xy_data
+        x0 = float(x0)
+        y0 = float(y0)
+        a = (np.cos(theta) ** 2) / (2 * sigma_x ** 2) + (np.sin(theta) ** 2) / (2 * sigma_y ** 2)
+        b = -(np.sin(2 * theta)) / (4 * sigma_x ** 2) + (np.sin(2 * theta)) / (4 * sigma_y ** 2)
+        c = (np.sin(theta) ** 2) / (2 * sigma_x ** 2) + (np.cos(theta) ** 2) / (2 * sigma_y ** 2)
+        g = offset + amplitude * np.exp(-(a * ((x - x0) ** 2) + 2 * b * (x - x0) * (y - y0) + c * ((y - y0) ** 2)))
+        return g
+
+    def fit_psf_to_gaussian(self, xx, yy, psf_data, x0, y0):
+        """
+        Fit a PSF array to a 2D Gaussian
+        :param xx: grid of X values to evaluate the Gaussian
+        :param yy: grid of Y values to evaluate the Gaussian
+        :param psf_data: PSF array to fit
+        :param x0: estimate of the X centre (typically geometric PSF centroid)
+        :param y0: estimate of the Y centre (typically geometric PSF centroid)
+        :return:
+        """
+        peak0, offset0 = 1.0, 0.0     # Guesses
+        rotation0 = 0.0              # Guesses
+        # We guess that the FWHM will be around 2 detector pixels [30 microns]
+        # Using the formula for a Gaussian FWHM = 2 sqrt(2 ln(2)) Sigma
+        sigma_fwhm = 30e-3 / 2 * np.sqrt(2 * np.log(2))
+        sigmax0, sigmay0 = sigma_fwhm, sigma_fwhm
+
+        guess_param = [x0, y0, sigmax0, sigmay0, rotation0, peak0, offset0]
+        bounds = ([-np.inf, -np.inf, 0.0, 0.0, -np.pi / 4, 0, -np.inf],
+                  [np.inf, np.inf, np.inf, np.inf, np.pi / 4, np.inf, np.inf])
+        # we don't let the theta vary more than +-45 degrees because that would
+        # flip the values of FWHM_X and FWHM_Y
+
+        try:
+            pars, cov = curve_fit(self.gaussian2d, (xx.ravel(), yy.ravel()), psf_data.ravel(),
+                                  p0=guess_param, bounds=bounds)
+            # Results of the fit for the sigmaX, sigmaY and theta
+            sigmaX, sigmaY, theta = pars[2], pars[3], pars[4]
+
+        except RuntimeError:    # If it fails to converge
+
+            sigmaX, sigmaY, theta = np.nan, np.nan, np.nan
+            raise ValueError("Gaussian Fit of the PSF failed!")
+
+        fwhm_x = 2 * np.sqrt(2 * np.log(2)) * sigmaX * 1000
+        fwhm_y = 2 * np.sqrt(2 * np.log(2)) * sigmaY * 1000
+
+        return fwhm_x, fwhm_y, theta
+
+
+diffraction = DifractionEffects()
+
+#
+# def twoD_Gaussian(data_tuple, x0, y0, sigma_x, sigma_y, theta, amplitude, offset):
+#     # Asymmetric 2d Gaussian
+#     (x, y) = data_tuple
+#     x0 = float(x0)
+#     y0 = float(y0)
+#     a = (np.cos(theta)**2)/(2*sigma_x**2) + (np.sin(theta)**2)/(2*sigma_y**2)
+#     b = -(np.sin(2*theta))/(4*sigma_x**2) + (np.sin(2*theta))/(4*sigma_y**2)
+#     c = (np.sin(theta)**2)/(2*sigma_x**2) + (np.cos(theta)**2)/(2*sigma_y**2)
+#     g = offset + amplitude * np.exp(-(a*((x-x0)**2) + 2*b*(x-x0)*(y-y0) + c*((y-y0)**2)))
+#     return g
+#
+# def fit_gaussian(xx, yy, data, x0, y0, sigmax0=0.025, sigmay0=0.025):
+#
+#     # peak, offset = 1.0, 0.0
+#     # sigmax0, sigmay0 = 0.015, 0.015     # 10 microns
+#     rotation0 = 0.0
+#     init = [x0, y0, sigmax0, sigmay0, rotation0, 1.0, 0.0]  # first guess of 1.0 for sigma
+#     bounds = ([-np.inf, -np.inf, 0.0, 0.0, -np.pi/4, -np.inf, -np.inf],
+#               [np.inf, np.inf, np.inf, np.inf, np.pi/4, np.inf, np.inf])
+#
+#     try:
+#         pars, cov = curve_fit(twoD_Gaussian, (xx.ravel(), yy.ravel()), data.ravel(), p0=init, bounds=bounds)
+#         sigmaX, sigmaY, theta = pars[2], pars[3], pars[4]
+#
+#     except RuntimeError:
+#         fig, ax = plt.subplots(1, 1)
+#         img = ax.imshow(data, cmap='bwr', origin='lower')
+#         # ax.scatter(x0, y0, s=3, color='black', alpha=0.5)
+#         plt.colorbar(img, ax=ax)
+#         plt.title('PSF to fit')
+#         plt.show()
+#         # sigmaX, sigmaY, theta = np.nan, np.nan, np.nan
+#         new_sigmax = np.random.uniform(low=0.010, high=0.030)
+#         new_sigmay = np.random.uniform(low=0.010, high=0.030)
+#         print("Fit error try again with new sigmas")
+#         fit_gaussian(xx, yy, data, x0, y0, sigmax0=new_sigmax, sigmay0=new_sigmay)
+#
+#     return sigmaX, sigmaY, theta
 
 
 def pixelate_crosstalk_psf(raw_psf, PSF_window, N_points, xt=0.02):
@@ -210,9 +394,7 @@ def pixelate_crosstalk_psf(raw_psf, PSF_window, N_points, xt=0.02):
     return cross_psf
 
 
-import functools
-from numpy.fft import ifft2, fft2, fftshift
-
+# Old code, get rid of it once new version is validated
 MAX_WAVES = 23
 @functools.lru_cache(maxsize=MAX_WAVES)
 def airy(wavelength, scale_mas, N_window):
@@ -245,24 +427,21 @@ def airy(wavelength, scale_mas, N_window):
     psf = (np.abs(image_electric))**2
     psf /= np.max(psf)
 
-    # min_pix, max_pix = N//2 - N_window//2, N//2 + N_window//2
-    # crop_psf = psf[min_pix:max_pix, min_pix:max_pix]
-
     # Add slicer effect
     x_min, x_max = -N/2 * SPAXEL_MAS, N/2 * SPAXEL_MAS
     x_slice = np.linspace(x_min, x_max, N, endpoint=True)
     x_grid, y_grid = np.meshgrid(x_slice, x_slice)
     slicer_mask = np.abs(y_grid) < scale_mas / 2
-
-    plt.figure()
-    plt.imshow(slicer_mask * psf, extent=[x_min, x_max, x_min, x_max], cmap='bwr')
-    plt.axhline(y=scale_mas/2, linestyle='--', color='black')
-    plt.axhline(y=-scale_mas/2, linestyle='--', color='black')
-    plt.xlabel(r'X [mas]')
-    plt.ylabel(r'Y [mas]')
-    plt.xlim([-15, 15])
-    plt.ylim([-15, 15])
-    plt.title(r'Airy Pattern | Slicer Mask %.1f mas' % scale_mas)
+    #
+    # plt.figure()
+    # plt.imshow(slicer_mask * psf, extent=[x_min, x_max, x_min, x_max], cmap='bwr')
+    # plt.axhline(y=scale_mas/2, linestyle='--', color='black')
+    # plt.axhline(y=-scale_mas/2, linestyle='--', color='black')
+    # plt.xlabel(r'X [mas]')
+    # plt.ylabel(r'Y [mas]')
+    # plt.xlim([-15, 15])
+    # plt.ylim([-15, 15])
+    # plt.title(r'Airy Pattern | Slicer Mask %.1f mas' % scale_mas)
 
     # Propagate to pupil plane
     pup_grating = ifft2(fftshift(slicer_mask * image_electric))
@@ -272,56 +451,49 @@ def airy(wavelength, scale_mas, N_window):
     # plt.figure()
     # plt.imshow((np.abs(pup_grating)**2), cmap='bwr')
     # plt.colorbar()
-
-    plt.figure()
-    plt.imshow(aperture_mask * (np.abs(pup_grating)**2), cmap='bwr')
-    # plt.colorbar()
-    plt.title(r'Pupil Plane | Aperture Mask')
+    #
+    # plt.figure()
+    # plt.imshow(aperture_mask * (np.abs(pup_grating)**2), cmap='bwr')
+    # # plt.colorbar()
+    # plt.title(r'Pupil Plane | Aperture Mask')
 
     # Back to focal plane
     final_focal = fftshift(fft2(aperture_mask * pup_grating))
 
-    plt.figure()
-    plt.imshow((np.abs(final_focal)**2), extent=[x_min, x_max, x_min, x_max], cmap='bwr')
-    # plt.colorbar()
-    plt.xlabel(r'X [mas]')
-    plt.ylabel(r'Y [mas]')
-    plt.xlim([-15, 15])
-    plt.ylim([-15, 15])
-    plt.title(r'Focal Plane | Aperture Mask')
+    # plt.figure()
+    # plt.imshow((np.abs(final_focal)**2), extent=[x_min, x_max, x_min, x_max], cmap='bwr')
+    # # plt.colorbar()
+    # plt.xlabel(r'X [mas]')
+    # plt.ylabel(r'Y [mas]')
+    # plt.xlim([-15, 15])
+    # plt.ylim([-15, 15])
+    # plt.title(r'Focal Plane | Aperture Mask')
+    #
+    # plt.show()
 
-    plt.show()
+    final_psf = np.abs(final_focal)**2
+    final_psf /= np.max(final_psf)
 
-    # return crop_psf
-    return
+    min_pix, max_pix = N//2 - N_window//2, N//2 + N_window//2
+    crop_psf = final_psf[min_pix:max_pix, min_pix:max_pix]
+
+    return crop_psf
+    # return
 
 
-def add_diffraction(psf_geo, wavelength):
+def add_diffraction(psf_geo, scale_mas, wavelength):
 
-
-    airy_pattern = airy(wavelength, N_window=psf_geo.shape[0])
+    airy_pattern = airy(wavelength, scale_mas, N_window=psf_geo.shape[0])
     # plt.figure()
     # plt.imshow(airy_pattern, cmap='bwr')
     # plt.colorbar()
     # plt.show()
     diffr = convolve2d(psf_geo, airy_pattern, mode='same')
+    diffr /= np.max(diffr)
 
     return diffr
 
 
-
-# x = np.linspace(-1, 1, 100)
-# xx, yy = np.meshgrid(x, x)
-# g = twoD_Gaussian(data_tuple=(xx, yy), x0=0.25, y0=0.15, sigma_x=1, sigma_y=0.5, theta=-np.pi/4)
-#
-# sigmaX, sigmaY, theta = fit_gaussian(xx, yy, g, x0=0.01, y0=0.01)
-#
-# plt.figure()
-# plt.imshow(g, origin='lower', extent=[-1, 1, -1, 1])
-# plt.xlabel(r'X[mm]')
-# plt.ylabel(r'Y[mm]')
-# plt.colorbar()
-# plt.show()
 
 def read_hdf5(path_to_file):
     """
@@ -2109,7 +2281,7 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
     and estimating the diameter of the 50% contour line
     """
 
-    def analysis_function_geofwhm_psf(self, system, wave_idx, config, surface, px, py, N_points,
+    def analysis_function_geofwhm_psf(self, system, wave_idx, config, surface, px, py, spaxel_scale, N_points,
                                       PSF_window, reference='Centroid'):
 
 
@@ -2205,17 +2377,18 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
         # Nowe we add various diffraction effects
 
         wavelength = system.SystemData.Wavelengths.GetWavelength(wave_idx).Wavelength
-        psf_diffr = add_diffraction(psf_geo, wavelength)
+        # Add diffraction
+        psf_diffr = diffraction.add_diffraction(psf_geo, PSF_window, spaxel_scale, wavelength)
+        # psf_diffr = add_diffraction(psf_geo, spaxel_scale, wavelength)
 
-        fig, (ax1, ax2) = plt.subplots(1, 2)
-        img1 = ax1.imshow(psf_geo, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
-        plt.colorbar(img1, ax=ax1, orientation='horizontal')
-
-        img2 = ax2.imshow(psf_diffr, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
-        plt.colorbar(img2, ax=ax2, orientation='horizontal')
-
-        plt.show()
-
+        # fig, (ax1, ax2) = plt.subplots(1, 2)
+        # img1 = ax1.imshow(psf_geo, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
+        # plt.colorbar(img1, ax=ax1, orientation='horizontal')
+        #
+        # img2 = ax2.imshow(psf_diffr, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
+        # plt.colorbar(img2, ax=ax2, orientation='horizontal')
+        #
+        # plt.show()
 
 
         # cross_psf = pixelate_crosstalk_psf(psf, PSF_window, N_points)
@@ -2227,15 +2400,16 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
         # xx_cross, yy_cross = np.meshgrid(x_cross, y_cross)
 
         # Fit the PSF to a 2D Gaussian
-        sigmaX, sigmaY, theta = fit_gaussian(xx=xx_grid, yy=yy_grid, data=psf_diffr, x0=cent_x, y0=cent_y)
+        fwhm_x, fwhm_y, theta = diffraction.fit_psf_to_gaussian(xx=xx_grid, yy=yy_grid, psf_data=psf_diffr, x0=cent_x, y0=cent_y)
+        # sigmaX, sigmaY, theta = fit_gaussian(xx=xx_grid, yy=yy_grid, data=psf_diffr, x0=cent_x, y0=cent_y)
 
-        fwhm_x = 2 * np.sqrt(2 * np.log(2)) * sigmaX * 1000
-        # fwhm_x_cross = 2 * np.sqrt(2 * np.log(2)) * sigmaX_cross * 1000
-        fwhm_y = 2 * np.sqrt(2 * np.log(2)) * sigmaY * 1000
+        # fwhm_x = 2 * np.sqrt(2 * np.log(2)) * sigmaX * 1000
+        # # fwhm_x_cross = 2 * np.sqrt(2 * np.log(2)) * sigmaX_cross * 1000
+        # fwhm_y = 2 * np.sqrt(2 * np.log(2)) * sigmaY * 1000
         # fwhm_y_cross = 2 * np.sqrt(2 * np.log(2)) * sigmaY_cross * 1000
 
         # if fwhm_x < 5 or fwhm_y < 5:
-        print("FWHM_x: %.1f | FWHM_y: %.1f | Theta: %.1f" % (fwhm_x, fwhm_y, np.rad2deg(theta)))
+        # print("FWHM_x: %.1f | FWHM_y: %.1f | Theta: %.1f" % (fwhm_x, fwhm_y, np.rad2deg(theta)))
         # # print("FWHM_x: %.1f | FWHM_y: %.1f | Theta: %.1f" % (fwhm_x_cross, fwhm_y_cross, np.rad2deg(theta_cross)))
         #
         #
@@ -2320,11 +2494,15 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
             # Clear the Cache for the Airy Pattern function
             airy.cache_clear()
 
+            mas_dict = {'4x4': 4.0, '10x10': 10.0, '20x20': 20.0, '60x30': 60.0}
+            spaxel_scale = mas_dict[settings['scale']]
+
             list_results = self.run_analysis(analysis_function=self.analysis_function_geofwhm_psf,
                                              files_dir=files_dir,zemax_file=zemax_file, results_path=results_path,
                                              results_shapes=results_shapes, results_names=results_names,
                                              wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
-                                             surface=surface, px=px, py=py, N_points=N_points, PSF_window=PSF_window)
+                                             surface=surface, px=px, py=py, spaxel_scale=spaxel_scale,
+                                             N_points=N_points, PSF_window=PSF_window)
 
 
             geo_fwhm, psf_cube, obj_xy, foc_xy, wavelengths = list_results
