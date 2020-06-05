@@ -20,4 +20,6 @@ Analysis implemented so far include:
 * **Ensquared Energy**: geometric value in spatial direction
 * **Spot Diagrams**: see example below at the Detector Plane
 
+More to come
+
 ![Spot Diagrams Detector Plane](sample_detector_spots.png?raw=true "Detector")
