@@ -227,6 +227,30 @@ def airy_and_slicer(wavelength, scale_mas, PSF_window, N_window):
     min_pix, max_pix = N//2 - N_window//2, N//2 + N_window//2
     crop_psf = final_psf[min_pix:max_pix, min_pix:max_pix]
 
+    # If we want to show the plots for Documentation
+
+    # fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
+    # psf_airy = (np.abs(image_electric))**2
+    # img1 = ax1.imshow(psf_airy, extent=[x_min, x_max, x_min, x_max], cmap='bwr')
+    # ax1.axhline(y=scale_mas/2, linestyle='--', color='black')
+    # ax1.axhline(y=-scale_mas/2, linestyle='--', color='black')
+    # ax1.set_xlabel(r'X [mas]')
+    # ax1.set_ylabel(r'Y [mas]')
+    # ax1.set_xlim([-15, 15])
+    # ax1.set_ylim([-15, 15])
+    # ax1.set_title(r'Airy Pattern | Slicer Mask %.1f mas' % scale_mas)
+    #
+    # img2 = ax2.imshow(aperture_mask * (np.abs(pup_grating)**2), cmap='bwr')
+    # ax2.set_title(r'Pupil Plane | Aperture Mask')
+    #
+    # img3 = ax3.imshow(final_psf, extent=[x_min, x_max, x_min, x_max], cmap='bwr')
+    # ax3.set_xlabel(r'X [mas]')
+    # ax3.set_ylabel(r'Y [mas]')
+    # ax3.set_xlim([-15, 15])
+    # ax3.set_ylim([-15, 15])
+    # ax3.set_title(r'Diffraction Effects')
+    # plt.show()
+
     return crop_psf
 
 
@@ -2145,45 +2169,45 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
         # print("Inside 2 pixel box: %d / %d" % (total_detector, checksum_detector))
         # print("Ensquared Energy: %.3f" % EE)
         #
-        #
-        # if config in [1, 2, 3, 4, 5, 6] and wave_idx in [1, 2, 3, 4, 5]:
-        #
-        #     print("\nTracing %d rays to calculate Ensquared Energy" % (N_rays))
-        #     fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
-        #     ax1.scatter(px, py, s=5, color='red')
-        #     ax1.scatter(px[valid_both], py[valid_both], s=5, color='lime')
-        #     ax1.set_xlabel(r'$P_x$')
-        #     ax1.set_ylabel(r'$P_y$')
-        #     ax1.set_xlim([-1, 1])
-        #     ax1.set_ylim([-1, 1])
-        #     ax1.set_title(r'Pupil Plane | %s rays' % N_rays)
-        #     ax1.set_aspect('equal')
-        #
-        #     sx, sy = slicer_xy[:, 0], slicer_xy[:, 1]
-        #     scx, scy = np.mean(sx), np.mean(sy)
-        #     ax2.scatter(sx, sy, s=3, color='red')
-        #     ax2.scatter(sx[valid_both], sy[valid_both], s=3, color='blue')
-        #     # ax2.scatter(scx, scy, s=8, color='red')
-        #     ax2.axhline(y=scy + 1.0, color='black', linestyle='--')
-        #     ax2.axhline(y=scy - 1.0, color='black', linestyle='--')
-        #     ax2.set_xlabel(r'Slicer X [mm]')
-        #     ax2.set_ylabel(r'Slicer Y [mm]')
-        #     ax2.set_xlim([scx - 2, scx + 2])
-        #     ax2.set_ylim([scy - 2, scy + 2])
-        #     ax2.set_title(r'Image Slicer | $\pm$1.0 mm wrt Centroid')
-        #     ax2.set_aspect('equal')
-        #
-        #     ax3.scatter(valid_det_x, valid_det_y, s=3, color='green')
-        #     ax3.scatter(vignetted[:, 0], vignetted[:, 1], s=3, color='orange')
-        #     ax3.axvline(x=sdx + det_pix, color='black', linestyle='--')
-        #     ax3.axvline(x=sdx - det_pix, color='black', linestyle='--')
-        #     ax3.set_xlabel(r'Detector X [mm]')
-        #     ax3.set_ylabel(r'Detector Y [mm]')
-        #     ax3.set_xlim([sdx - 2*det_pix, sdx + 2*det_pix])
-        #     ax3.set_ylim([sdy - 2*det_pix, sdy + 2*det_pix])
-        #     ax3.set_title(r'Detector Plane | $\pm$15 $\mu$m wrt Centroid')
-        #     ax3.set_aspect('equal')
-        # plt.show()
+
+        if config in [1, 2, 3, 4, 5, 6] and wave_idx in [1, 2, 3, 4, 5]:
+
+            print("\nTracing %d rays to calculate Ensquared Energy" % (N_rays))
+            fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
+            # ax1.scatter(px, py, s=5, color='red')
+            ax1.scatter(px[valid_both], py[valid_both], s=5, color='lime')
+            ax1.set_xlabel(r'$P_x$')
+            ax1.set_ylabel(r'$P_y$')
+            ax1.set_xlim([-1, 1])
+            ax1.set_ylim([-1, 1])
+            ax1.set_title(r'Pupil Plane | %s rays' % N_rays)
+            ax1.set_aspect('equal')
+
+            sx, sy = slicer_xy[:, 0], slicer_xy[:, 1]
+            scx, scy = np.mean(sx), np.mean(sy)
+            ax2.scatter(sx, sy, s=3, color='red')
+            ax2.scatter(sx[valid_both], sy[valid_both], s=3, color='blue')
+            # ax2.scatter(scx, scy, s=8, color='red')
+            ax2.axhline(y=scy + 1.0, color='black', linestyle='--')
+            ax2.axhline(y=scy - 1.0, color='black', linestyle='--')
+            ax2.set_xlabel(r'Slicer X [mm]')
+            ax2.set_ylabel(r'Slicer Y [mm]')
+            ax2.set_xlim([scx - 2, scx + 2])
+            ax2.set_ylim([scy - 2, scy + 2])
+            ax2.set_title(r'Image Slicer | $\pm$1.0 mm wrt Centroid')
+            ax2.set_aspect('equal')
+
+            ax3.scatter(valid_det_x, valid_det_y, s=3, color='green')
+            ax3.scatter(vignetted[:, 0], vignetted[:, 1], s=3, color='orange')
+            ax3.axvline(x=sdx + det_pix, color='black', linestyle='--')
+            ax3.axvline(x=sdx - det_pix, color='black', linestyle='--')
+            ax3.set_xlabel(r'Detector X [mm]')
+            ax3.set_ylabel(r'Detector Y [mm]')
+            ax3.set_xlim([sdx - 2*det_pix, sdx + 2*det_pix])
+            ax3.set_ylim([sdy - 2*det_pix, sdy + 2*det_pix])
+            ax3.set_title(r'Detector Plane | $\pm$15 $\mu$m wrt Centroid')
+            ax3.set_aspect('equal')
+        plt.show()
 
 
         return [EE, obj_xy, [scx, scy], [sdx, sdy]]
@@ -2359,10 +2383,10 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
         kde = KernelDensity(kernel='gaussian', bandwidth=bandwidth).fit(XY)
 
         # define a grid to compute the PSF
-        # xmin, xmax = cent_x - 3 * std, cent_x + 3 * std
-        # ymin, ymax = cent_y - 3 * std, cent_y + 3 * std
-        xmin, xmax = cent_x - PSF_window/2/1000 + 7.5 / 1000, cent_x + PSF_window/2/1000 + 7.5 / 1000
-        ymin, ymax = cent_y - PSF_window/2/1000 + 7.5 / 1000, cent_y + PSF_window/2/1000 + 7.5 / 1000
+        xmin, xmax = cent_x - PSF_window/2/1000, cent_x + PSF_window/2/1000
+        ymin, ymax = cent_y - PSF_window/2/1000, cent_y + PSF_window/2/1000
+        # xmin, xmax = cent_x - PSF_window/2/1000 + 7.5 / 1000, cent_x + PSF_window/2/1000 + 7.5 / 1000
+        # ymin, ymax = cent_y - PSF_window/2/1000 + 7.5 / 1000, cent_y + PSF_window/2/1000 + 7.5 / 1000
         x_grid = np.linspace(xmin, xmax, N_points)
         y_grid = np.linspace(ymin, ymax, N_points)
         xx_grid, yy_grid = np.meshgrid(x_grid, y_grid)
@@ -2372,6 +2396,13 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
         psf_geo = np.exp(log_scores)
         psf_geo /= np.max(psf_geo)
         psf_geo = psf_geo.reshape(xx_grid.shape)
+
+        # fig, ax = plt.subplots(1, 1)
+        # img = ax.imshow(psf_geo, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
+        # ax.scatter(x, y, color='black', s=3)
+        # ax.set_xlim([cent_x - 0.015, cent_x + 0.015])
+        # ax.set_ylim([cent_y - 0.015, cent_y + 0.015])
+        # plt.show()
 
         # Up to here the PSF is Geometric (just tracing rays)
         # Nowe we add various diffraction effects
@@ -2384,9 +2415,15 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
         # fig, (ax1, ax2) = plt.subplots(1, 2)
         # img1 = ax1.imshow(psf_geo, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
         # plt.colorbar(img1, ax=ax1, orientation='horizontal')
+        # ax1.set_xlabel(r'X [mm]')
+        # ax1.set_ylabel(r'Y [mm]')
+        # ax1.set_title(r'Geometric PSF estimate')
         #
         # img2 = ax2.imshow(psf_diffr, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
         # plt.colorbar(img2, ax=ax2, orientation='horizontal')
+        # ax2.set_xlabel(r'X [mm]')
+        # ax2.set_ylabel(r'Y [mm]')
+        # ax2.set_title(r'Diffraction PSF')
         #
         # plt.show()
 
@@ -2438,7 +2475,6 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
         #     img4 = ax4.imshow(fit, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
         #     ax4.set_title(r'Guassian Fit (Pixelated)')
         #     plt.colorbar(img4, ax=ax4, orientation='horizontal')
-
 
         FWHM[:] = [fwhm_x, fwhm_y, theta]        # Store the results
 
