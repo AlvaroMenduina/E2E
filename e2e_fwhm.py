@@ -31,8 +31,8 @@ def fwhm_psf_detector(zosapi, spaxel_scale, grating, N_waves, N_rays):
 
     analysis = e2e.GeometricFWHM_PSF_Analysis(zosapi=zosapi)
 
-    # ifu_sections = ['AB', 'CD', 'EF', 'GH']
-    ifu_sections = ['AB', 'CD']
+    ifu_sections = ['AB', 'CD', 'EF', 'GH']
+    # ifu_sections = ['AB', 'CD']
 
     analysis_dir = os.path.join(results_path, 'FWHM')
     print("Analysis Results will be saved in folder: ", analysis_dir)
@@ -46,8 +46,8 @@ def fwhm_psf_detector(zosapi, spaxel_scale, grating, N_waves, N_rays):
                    'grating': [grating]}
         focal_plane = e2e.focal_planes['IFS'][spaxel_scale][ifu_section]['DET']
 
-        wavelength_idx = np.linspace(1, 23, N_waves).astype(int)
-        # wavelength_idx = [12]
+        # wavelength_idx = np.linspace(1, 23, N_waves).astype(int)
+        wavelength_idx = [12]
         list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options, results_path=results_path,
                                                 wavelength_idx=wavelength_idx, configuration_idx=None, surface=focal_plane,
                                                 N_rays=N_rays)
@@ -242,7 +242,7 @@ if __name__ == """__main__""":
     gratings = ['IZ', 'J', 'IZJ', 'Z_HIGH', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
     # gratings = ['HK']
 
-    spaxel_scale = '60x30'
+    spaxel_scale = '4x4'
 
     fx, fy, stats = fwhm_all_gratings(zosapi=psa, spaxel_scale=spaxel_scale, grating_list=gratings, N_waves=3, N_rays=500)
 

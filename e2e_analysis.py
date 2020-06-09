@@ -254,7 +254,7 @@ def airy_and_slicer(wavelength, scale_mas, PSF_window, N_window):
     return crop_psf
 
 
-class DifractionEffects(object):
+class DiffractionEffects(object):
     """
     A class to take care of diffraction effects
     for the PSF FWHM calculations
@@ -355,7 +355,7 @@ class DifractionEffects(object):
         return fwhm_x, fwhm_y, theta
 
 
-diffraction = DifractionEffects()
+diffraction = DiffractionEffects()
 
 #
 # def twoD_Gaussian(data_tuple, x0, y0, sigma_x, sigma_y, theta, amplitude, offset):
@@ -2357,17 +2357,31 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
 
         CastTo(raytrace, 'ISystemTool').RunAndWaitForCompletion()
         normUnPolData.StartReadingResults()
+        checksum = 0
+        vignetted = 0
+        valid_index = []
         for i in range(N_rays):
             output = normUnPolData.ReadNextResult()
             if output[2] == 0 and output[3] == 0:
                 XY[i, 0] = output[4]
                 XY[i, 1] = output[5]
+                checksum += 1
+                valid_index.append(i)
+
+            elif output[2] == 0 and output[3] != 0:
+                vignette_code = output[3]
+                vignetted += 1
+
+        # print("Rays that made it to the Detector: %d / %d" % (checksum, N_rays))
+        # print("Rays that are vignetted: %d / %d" % (vignetted, N_rays))
 
         normUnPolData.ClearData()
         CastTo(raytrace, 'ISystemTool').Close()
 
         # Calculate the FWHM
-        x, y = XY[:, 0], XY[:, 1]
+        x, y = XY[:, 0][valid_index], XY[:, 1][valid_index]
+        XY_valid = np.stack([x, y]).T
+
         cent_x, cent_y = np.mean(x), np.mean(y)
         foc_xy[:] = [cent_x, cent_y]
 
@@ -2380,7 +2394,7 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
         std_x, std_y = np.std(x), np.std(y)
         std = max(std_x, std_y)
         bandwidth = min(std_x, std_y)
-        kde = KernelDensity(kernel='gaussian', bandwidth=bandwidth).fit(XY)
+        kde = KernelDensity(kernel='gaussian', bandwidth=bandwidth).fit(XY_valid)
 
         # define a grid to compute the PSF
         xmin, xmax = cent_x - PSF_window/2/1000, cent_x + PSF_window/2/1000
@@ -2400,8 +2414,8 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
         # fig, ax = plt.subplots(1, 1)
         # img = ax.imshow(psf_geo, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
         # ax.scatter(x, y, color='black', s=3)
-        # ax.set_xlim([cent_x - 0.015, cent_x + 0.015])
-        # ax.set_ylim([cent_y - 0.015, cent_y + 0.015])
+        # # ax.set_xlim([cent_x - 0.015, cent_x + 0.015])
+        # # ax.set_ylim([cent_y - 0.015, cent_y + 0.015])
         # plt.show()
 
         # Up to here the PSF is Geometric (just tracing rays)
@@ -2439,6 +2453,7 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
         # Fit the PSF to a 2D Gaussian
         fwhm_x, fwhm_y, theta = diffraction.fit_psf_to_gaussian(xx=xx_grid, yy=yy_grid, psf_data=psf_diffr, x0=cent_x, y0=cent_y)
         # sigmaX, sigmaY, theta = fit_gaussian(xx=xx_grid, yy=yy_grid, data=psf_diffr, x0=cent_x, y0=cent_y)
+        # print("FWHM_x: %.1f | FWHM_y: %.1f | Theta: %.1f" % (fwhm_x, fwhm_y, np.rad2deg(theta)))
 
         # fwhm_x = 2 * np.sqrt(2 * np.log(2)) * sigmaX * 1000
         # # fwhm_x_cross = 2 * np.sqrt(2 * np.log(2)) * sigmaX_cross * 1000
@@ -2446,7 +2461,7 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
         # fwhm_y_cross = 2 * np.sqrt(2 * np.log(2)) * sigmaY_cross * 1000
 
         # if fwhm_x < 5 or fwhm_y < 5:
-        # print("FWHM_x: %.1f | FWHM_y: %.1f | Theta: %.1f" % (fwhm_x, fwhm_y, np.rad2deg(theta)))
+
         # # print("FWHM_x: %.1f | FWHM_y: %.1f | Theta: %.1f" % (fwhm_x_cross, fwhm_y_cross, np.rad2deg(theta_cross)))
         #
         #

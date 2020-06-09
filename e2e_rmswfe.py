@@ -482,7 +482,7 @@ if __name__ == """__main__""":
         os.mkdir(analysis_dir)
 
     gratings = ['Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
-    for spaxel_scale in ['60x30']:
+    for spaxel_scale in ['4x4']:
 
         rms_grating = []
         for grating in gratings:
@@ -494,17 +494,17 @@ if __name__ == """__main__""":
 
         rms_grating = np.array(rms_grating).T
 
-        data = pd.DataFrame(rms_grating, columns=gratings)
-
-        fig_box, ax = plt.subplots(1, 1, figsize=(10, 6))
-        sns.boxplot(data=data, ax=ax, hue_order=gratings, palette=sns.color_palette("Blues"))
-        ax.set_ylabel(r'RMS WFE [nm]')
-        ax.set_title(r'RMS WFE Detector | %s scale' % (spaxel_scale))
-
-        fig_name = "RMSMAP_%s_DETECTOR_ALL_SPEC_BOXWHISKER" % (spaxel_scale)
-        if os.path.isfile(os.path.join(analysis_dir, fig_name)):
-            os.remove(os.path.join(analysis_dir, fig_name))
-        fig_box.savefig(os.path.join(analysis_dir, fig_name))
+        # data = pd.DataFrame(rms_grating, columns=gratings)
+        #
+        # fig_box, ax = plt.subplots(1, 1, figsize=(10, 6))
+        # sns.boxplot(data=data, ax=ax, hue_order=gratings, palette=sns.color_palette("Blues"))
+        # ax.set_ylabel(r'RMS WFE [nm]')
+        # ax.set_title(r'RMS WFE Detector | %s scale' % (spaxel_scale))
+        #
+        # fig_name = "RMSMAP_%s_DETECTOR_ALL_SPEC_BOXWHISKER" % (spaxel_scale)
+        # if os.path.isfile(os.path.join(analysis_dir, fig_name)):
+        #     os.remove(os.path.join(analysis_dir, fig_name))
+        # fig_box.savefig(os.path.join(analysis_dir, fig_name))
 
     plt.show()
 
