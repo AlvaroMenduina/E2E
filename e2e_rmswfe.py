@@ -12,11 +12,25 @@ import numpy as np
 import e2e_analysis as e2e
 import matplotlib.pyplot as plt
 import matplotlib.tri as tri
+from matplotlib.patches import Rectangle
 import pandas as pd
 import seaborn as sns
 
 
-def rms_wfe_histograms(zosapi, spaxel_scale, spaxels_per_slice, wavelength_idx, spectral_band, plane,
+def draw_detector_boundary(ax):
+    det_pix = 15e-3  # detector pixel in mm
+    width = 2 * 4096 * det_pix + 3
+    # 2 CCDs + 3 mm gap
+    height = 4096 * det_pix
+    # Create a Rectangle patch
+    rect = Rectangle((-width / 2, -height / 2), width, height, linewidth=1, edgecolor='black',
+                     linestyle='--', facecolor='none')
+    # Add the patch to the Axes
+    ax.add_patch(rect)
+    return
+
+
+def rms_wfe_histograms(zosapi, mode, spaxel_scale, spaxels_per_slice, wavelength_idx, spectral_band, plane,
                        files_path, results_path):
 
     """
@@ -32,17 +46,22 @@ def rms_wfe_histograms(zosapi, spaxel_scale, spaxels_per_slice, wavelength_idx, 
     :return:
     """
 
+    if mode == 'IFS':
+        ao_modes = []
+    elif mode == 'HARMONI':
+        ao_modes = ['NOAO']
+
     ifu_sections = ['AB', 'CD', 'EF', 'GH']
     analysis = e2e.RMS_WFE_Analysis(zosapi=zosapi)
 
     rms = []
     for ifu_section in ifu_sections:
 
-        options = {'which_system': 'IFS', 'AO_modes': [], 'scales': [spaxel_scale], 'IFUs': [ifu_section],
+        options = {'which_system': mode, 'AO_modes': ao_modes, 'scales': [spaxel_scale], 'IFUs': [ifu_section],
                    'grating': [spectral_band]}
         # We need to know the Surface Number for the focal plane of interest in the Zemax files
         # this is something varies with mode, scale, ifu channel so we save those numbers on e2e.focal_planes dictionary
-        focal_plane = e2e.focal_planes['IFS'][spaxel_scale][ifu_section][plane]
+        focal_plane = e2e.focal_planes[mode][spaxel_scale][ifu_section][plane]
         list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options, results_path=results_path,
                                                 wavelength_idx=wavelength_idx, configuration_idx=None,
                                                 surface=focal_plane, spaxels_per_slice=spaxels_per_slice, plots=False)
@@ -71,7 +90,7 @@ def rms_wfe_histograms(zosapi, spaxel_scale, spaxels_per_slice, wavelength_idx, 
     return
 
 
-def stitch_fields(zosapi, spaxel_scale, spaxels_per_slice, wavelength_idx, spectral_band, plane,
+def stitch_fields(zosapi, mode, spaxel_scale, spaxels_per_slice, wavelength_idx, spectral_band, plane,
                   files_path, results_path, show='focal'):
     """
     Loop over the IFU sections AB, CD, EF, GH and calculate the RMS WFE map for each case
@@ -86,6 +105,7 @@ def stitch_fields(zosapi, spaxel_scale, spaxels_per_slice, wavelength_idx, spect
     it makes no sense to use 'object' coordinates because the wavelengths would overlap, we must use 'focal'
 
     :param zosapi: the Python Standalone Application
+    :param mode: E2E file mode: IFS, HARMONI or ELT
     :param spaxel_scale: string, spaxel scale like '60x30'
     :param spaxels_per_slice: how many points to sample each slice.
     :param wavelength_idx: list of Zemax wavelength indices to analyse
@@ -97,17 +117,22 @@ def stitch_fields(zosapi, spaxel_scale, spaxels_per_slice, wavelength_idx, spect
     :return:
     """
 
+    if mode == 'IFS':
+        ao_modes = []
+    elif mode == 'HARMONI':
+        ao_modes = ['NOAO']
+
     ifu_sections = ['AB', 'CD', 'EF', 'GH']
     analysis = e2e.RMS_WFE_Analysis(zosapi=zosapi)
     rms_maps, object_coord, focal_coord = [], [], []
 
     for ifu_section in ifu_sections:
 
-        options = {'which_system': 'IFS', 'AO_modes': [], 'scales': [spaxel_scale], 'IFUs': [ifu_section],
+        options = {'which_system': mode, 'AO_modes': ao_modes, 'scales': [spaxel_scale], 'IFUs': [ifu_section],
                    'grating': [spectral_band]}
         # We need to know the Surface Number for the focal plane of interest in the Zemax files
         # this is something varies with mode, scale, ifu channel so we save those numbers on e2e.focal_planes dictionary
-        focal_plane = e2e.focal_planes['IFS'][spaxel_scale][ifu_section][plane]
+        focal_plane = e2e.focal_planes[mode][spaxel_scale][ifu_section][plane]
         list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options, results_path=results_path,
                                                 wavelength_idx=wavelength_idx, configuration_idx=None,
                                                 surface=focal_plane, spaxels_per_slice=spaxels_per_slice, plots=False)
@@ -227,35 +252,39 @@ def stitch_fields(zosapi, spaxel_scale, spaxels_per_slice, wavelength_idx, spect
                 tpc_even = ax.tripcolor(triang_even, _rms_field[:, 1::2].flatten(), shading='flat', cmap='jet')
                 tpc_even.set_clim(vmin=min_rms, vmax=max_rms)
                 # ax.scatter(x, y, s=2, color='black')
+
+                draw_detector_boundary(ax)
+
                 axis_label = 'Detector'
                 ax.set_xlabel(axis_label + r' X [mm]')
                 ax.set_ylabel(axis_label + r' Y [mm]')
                 ax.set_aspect('equal')
-                plt.colorbar(tpc_odd, ax=ax, orientation='horizontal')
-                title = r'IFU-%s | %s mas | %s SPEC' % (ifu_section, spaxel_scale, spectral_band)
+                cbar = plt.colorbar(tpc_odd, ax=ax, orientation='horizontal')
+                cbar.ax.set_xlabel('[nm]')
+                title = r'IFU-%s | %s mas | %s SPEC | %s' % (ifu_section, spaxel_scale, spectral_band, mode)
                 ax.set_title(title)
-                fig_name = "RMSMAP_%s_DETECTOR_SPEC_%s" % (spaxel_scale, spectral_band)
+                fig_name = "RMSMAP_%s_DETECTOR_SPEC_%s_MODE_%s" % (spaxel_scale, spectral_band, mode)
                 if os.path.isfile(os.path.join(results_path, fig_name)):
                     os.remove(os.path.join(results_path, fig_name))
                 fig.savefig(os.path.join(results_path, fig_name))
-                plt.close(fig)
+                # plt.close(fig)
 
-        # Plot the histograms
-        fig_hist, axes = plt.subplots(2, 2, figsize=(10, 10))
-        for i in range(4):
-            ax = axes.flatten()[i]
-            ax.hist(rms_maps[i].flatten(), bins=np.arange(0, max_rms, 2), histtype='step', color='red')
-            ax.set_title(r'IFU-%s' % ifu_sections[i])
-            ax.set_xlabel(r'RMS WFE [nm]')
-            ax.set_ylabel(r'Frequency')
-            ax.set_xlim([min_rms, max_rms])
-            ax.set_xticks(np.arange(0, max_rms, 5))
-
-        fig_name = "RMSMAP_%s_DETECTOR_SPEC_%s_HISTOGRAM" % (spaxel_scale, spectral_band)
-        if os.path.isfile(os.path.join(results_path, fig_name)):
-            os.remove(os.path.join(results_path, fig_name))
-        fig_hist.savefig(os.path.join(results_path, fig_name))
-        plt.close(fig_hist)
+        # # Plot the histograms
+        # fig_hist, axes = plt.subplots(2, 2, figsize=(10, 10))
+        # for i in range(4):
+        #     ax = axes.flatten()[i]
+        #     ax.hist(rms_maps[i].flatten(), bins=np.arange(0, max_rms, 2), histtype='step', color='red')
+        #     ax.set_title(r'IFU-%s' % ifu_sections[i])
+        #     ax.set_xlabel(r'RMS WFE [nm]')
+        #     ax.set_ylabel(r'Frequency')
+        #     ax.set_xlim([min_rms, max_rms])
+        #     ax.set_xticks(np.arange(0, max_rms, 5))
+        #
+        # fig_name = "RMSMAP_%s_DETECTOR_SPEC_%s_HISTOGRAM" % (spaxel_scale, spectral_band)
+        # if os.path.isfile(os.path.join(results_path, fig_name)):
+        #     os.remove(os.path.join(results_path, fig_name))
+        # fig_hist.savefig(os.path.join(results_path, fig_name))
+        # plt.close(fig_hist)
 
         # Box and Whisker plots
 
@@ -267,8 +296,8 @@ def stitch_fields(zosapi, spaxel_scale, spaxels_per_slice, wavelength_idx, spect
         fig_box, ax = plt.subplots(1, 1)
         sns.boxplot(data=data, ax=ax)
         ax.set_ylabel(r'RMS WFE [nm]')
-        ax.set_title(r'RMS WFE Detector | %s scale | %s band' % (spaxel_scale, spectral_band))
-        fig_name = "RMSMAP_%s_DETECTOR_SPEC_%s_BOXWHISKER" % (spaxel_scale, spectral_band)
+        ax.set_title(r'RMS WFE Detector | %s scale | %s band | %s' % (spaxel_scale, spectral_band, mode))
+        fig_name = "RMSMAP_%s_DETECTOR_SPEC_%s_BOXWHISKER_MODE_%s" % (spaxel_scale, spectral_band, mode)
         if os.path.isfile(os.path.join(results_path, fig_name)):
             os.remove(os.path.join(results_path, fig_name))
         fig_box.savefig(os.path.join(results_path, fig_name))
@@ -450,8 +479,8 @@ if __name__ == """__main__""":
     # Create a Python Standalone Application
     psa = e2e.PythonStandaloneApplication()
 
-    files_path = os.path.abspath("D:\End to End Model\April_2020")
-    results_path = os.path.abspath("D:\End to End Model\Results_April")
+    files_path = os.path.abspath("D:\End to End Model\June_2020")
+    results_path = os.path.abspath("D:\End to End Model\Results_June")
 
     # analysis = e2e.RMS_WFE_Analysis(zosapi=psa)
     # options = {'which_system': 'IFS', 'AO_modes': [], 'scales': ['60x30'], 'IFUs': ['AB'],
@@ -482,36 +511,37 @@ if __name__ == """__main__""":
         os.mkdir(analysis_dir)
 
     gratings = ['Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
-    for spaxel_scale in ['4x4']:
+    mode = 'HARMONI'
+    for spaxel_scale in ['10x10']:
 
         rms_grating = []
         for grating in gratings:
-            stitched_results = stitch_fields(zosapi=psa, spaxel_scale=spaxel_scale, spaxels_per_slice=3, wavelength_idx=None,
-                                             spectral_band=grating, plane='DET',files_path=files_path, results_path=results_path,
+            stitched_results = stitch_fields(zosapi=psa, mode=mode, spaxel_scale=spaxel_scale, spaxels_per_slice=3, wavelength_idx=None,
+                                             spectral_band=grating, plane='DET', files_path=files_path, results_path=results_path,
                                              show='focal')
             rms_allifu = stitched_results[0]
             rms_grating.append(rms_allifu.flatten())
 
         rms_grating = np.array(rms_grating).T
 
-        # data = pd.DataFrame(rms_grating, columns=gratings)
-        #
-        # fig_box, ax = plt.subplots(1, 1, figsize=(10, 6))
-        # sns.boxplot(data=data, ax=ax, hue_order=gratings, palette=sns.color_palette("Blues"))
-        # ax.set_ylabel(r'RMS WFE [nm]')
-        # ax.set_title(r'RMS WFE Detector | %s scale' % (spaxel_scale))
-        #
-        # fig_name = "RMSMAP_%s_DETECTOR_ALL_SPEC_BOXWHISKER" % (spaxel_scale)
-        # if os.path.isfile(os.path.join(analysis_dir, fig_name)):
-        #     os.remove(os.path.join(analysis_dir, fig_name))
-        # fig_box.savefig(os.path.join(analysis_dir, fig_name))
+        data = pd.DataFrame(rms_grating, columns=gratings)
+
+        fig_box, ax = plt.subplots(1, 1, figsize=(10, 6))
+        sns.boxplot(data=data, ax=ax, hue_order=gratings, palette=sns.color_palette("Blues"))
+        ax.set_ylabel(r'RMS WFE [nm]')
+        ax.set_title(r'RMS WFE Detector | %s scale | %s' % (spaxel_scale, mode))
+
+        fig_name = "RMSMAP_%s_DETECTOR_ALL_SPEC_BOXWHISKER_%s" % (spaxel_scale, mode)
+        if os.path.isfile(os.path.join(analysis_dir, fig_name)):
+            os.remove(os.path.join(analysis_dir, fig_name))
+        fig_box.savefig(os.path.join(analysis_dir, fig_name))
 
     plt.show()
 
 
 
 
-    rms_wfe_histograms(zosapi=psa, spaxel_scale=spaxel_scale, spaxels_per_slice=3, wavelength_idx=None,
+    rms_wfe_histograms(zosapi=psa, mode=mode, spaxel_scale=spaxel_scale, spaxels_per_slice=3, wavelength_idx=None,
                                      spectral_band=grating, plane='DET', files_path=files_path, results_path=results_path)
 
     # Fix the 60x30 surface dictionary
@@ -521,7 +551,7 @@ if __name__ == """__main__""":
     # at the PreOptics focal plane
     # both in Focal Plane coordinates and Object Space coordinates
     # for the chosen grating at 3 wavelengths (shortest, central, longest)
-    stitched_results = stitch_fields(zosapi=psa, spaxel_scale=spaxel_scale, spaxels_per_slice=10, wavelength_idx=[1, 12, 23],
+    stitched_results = stitch_fields(zosapi=psa, mode=mode, spaxel_scale=spaxel_scale, spaxels_per_slice=10, wavelength_idx=[1, 12, 23],
                                      spectral_band=grating, plane='PO', files_path=files_path, results_path=results_path,
                                      show='both')
     plt.show()

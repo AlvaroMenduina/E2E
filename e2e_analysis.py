@@ -60,6 +60,26 @@ focal_planes['IFS'] = {'4x4': {'AB': {'FPRS': 6, 'PO': 41, 'IS': 70, 'SL': 88, '
                                  'EF': {'FPRS': 6, 'PO': 30, 'IS': 59, 'SL': 77, 'DET': None},
                                  'GH': {'FPRS': 6, 'PO': 30, 'IS': 58, 'SL': 77, 'DET': None}}}
 
+# Update for June values
+
+focal_planes['HARMONI'] = {'4x4': {'AB': {'DET': None},
+                                   'CD': {'DET': None},
+                                   'EF': {'DET': None},
+                                   'GH': {'DET': None}},
+                           '10x10': {'AB': {'DET': None},
+                                   'CD': {'DET': None},
+                                   'EF': {'DET': None},
+                                   'GH': {'DET': None}},
+                           '20x20': {'AB': {'DET': None},
+                                   'CD': {'DET': None},
+                                   'EF': {'DET': None},
+                                   'GH': {'DET': None}},
+                           '60x30': {'AB': {'DET': None},
+                                   'CD': {'DET': None},
+                                   'EF': {'DET': None},
+                                   'GH': {'DET': None}}
+                           }
+
 # focal_planes = {}
 # focal_planes['IFS'] = {'60x30': {'AB': {'PO': 31},
 #                                  'CD': {'PO': 31},
@@ -3050,8 +3070,8 @@ class RMS_WFE_Analysis(AnalysisGeneric):
             results_dir = os.path.join(results_path, file_name)
             settings['surface'] = 'IMG' if surface is None else surface
 
-            self.save_hdf5(analysis_name='RMS_WFE', analysis_metadata=metadata, list_results=list_results, results_names=results_names,
-                           file_name=file_name, file_settings=settings, results_dir=results_path)
+            # self.save_hdf5(analysis_name='RMS_WFE', analysis_metadata=metadata, list_results=list_results, results_names=results_names,
+            #                file_name=file_name, file_settings=settings, results_dir=results_path)
 
             if plots is True:
                 self.plot_and_save(analysis_name='RMS_WFE', list_results=list_results, file_name=file_name,

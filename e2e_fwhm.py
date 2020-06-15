@@ -17,11 +17,12 @@ import matplotlib.tri as tri
 import pandas as pd
 import seaborn as sns
 
-def fwhm_psf_detector(zosapi, spaxel_scale, grating, N_waves, N_rays):
+def fwhm_psf_detector(zosapi, mode, spaxel_scale, grating, N_waves, N_rays):
     """
     Calculate the FWHM PSF at the Detector Plane
     in both directions, acrosss and along the Slices
     :param zosapi:
+    :param mode:
     :param spaxel_scale:
     :param grating:
     :param N_waves:
@@ -42,12 +43,11 @@ def fwhm_psf_detector(zosapi, spaxel_scale, grating, N_waves, N_rays):
     fx, fy = [], []
     focal_coord = []
     for ifu_section in ifu_sections:
-        options = {'which_system': 'IFS', 'AO_modes': [], 'scales': [spaxel_scale], 'IFUs': [ifu_section],
+        options = {'which_system': mode, 'AO_modes': [], 'scales': [spaxel_scale], 'IFUs': [ifu_section],
                    'grating': [grating]}
         focal_plane = e2e.focal_planes['IFS'][spaxel_scale][ifu_section]['DET']
 
-        # wavelength_idx = np.linspace(1, 23, N_waves).astype(int)
-        wavelength_idx = [12]
+        wavelength_idx = np.linspace(1, 23, N_waves).astype(int)
         list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options, results_path=results_path,
                                                 wavelength_idx=wavelength_idx, configuration_idx=None, surface=focal_plane,
                                                 N_rays=N_rays)
@@ -106,6 +106,8 @@ def fwhm_all_gratings(zosapi, spaxel_scale, grating_list, N_waves, N_rays):
     ax2.set_ylim([min_val, max_val])
     ax1.set_title('FWHM Along Slice [X]')
     ax2.set_title('FWHM Across Slice [Y]')
+    ax1.set_title('FWHM [$\mu$m]')
+    ax2.set_title('FWHM [$\mu$m]')
 
     stats = [minX, meanX, maxX, minY, meanY, maxY]
 
