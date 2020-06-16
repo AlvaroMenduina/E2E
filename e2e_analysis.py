@@ -62,18 +62,18 @@ focal_planes['IFS'] = {'4x4': {'AB': {'FPRS': 6, 'PO': 41, 'IS': 70, 'SL': 88, '
 
 # Update for June values
 
-focal_planes['HARMONI'] = {'4x4': {'AB': {'DET': None},
-                                   'CD': {'DET': None},
-                                   'EF': {'DET': None},
-                                   'GH': {'DET': None}},
-                           '10x10': {'AB': {'DET': None},
-                                   'CD': {'DET': None},
-                                   'EF': {'DET': None},
-                                   'GH': {'DET': None}},
-                           '20x20': {'AB': {'DET': None},
-                                   'CD': {'DET': None},
-                                   'EF': {'DET': None},
-                                   'GH': {'DET': None}},
+focal_planes['HARMONI'] = {'4x4': {'AB': {'IS': 96, 'DET': None},
+                                   'CD': {'IS': 95, 'DET': None},
+                                   'EF': {'IS': 96, 'DET': None},
+                                   'GH': {'IS': 95, 'DET': None}},
+                           '10x10': {'AB': {'IS': 92, 'DET': None},
+                                     'CD': {'IS': 91, 'DET': None},
+                                     'EF': {'IS': 92, 'DET': None},
+                                     'GH': {'IS': 91, 'DET': None}},
+                           '20x20': {'AB': {'IS': 93, 'DET': None},
+                                     'CD': {'IS': 92, 'DET': None},
+                                     'EF': {'IS': 93, 'DET': None},
+                                     'GH': {'IS': 92, 'DET': None}},
                            '60x30': {'AB': {'DET': None},
                                    'CD': {'DET': None},
                                    'EF': {'DET': None},
@@ -865,9 +865,9 @@ class AnalysisGeneric(object):
         N_surfaces = LDE.NumberOfSurfaces
         N_configs = MCE.NumberOfConfigurations
 
-        print("\nSystem Data:")
+        # print("\nSystem Data:")
         print("Number of Surfaces: ", N_surfaces)
-        print("Number of Configurations / Slices: ", N_configs)
+        # print("Number of Configurations / Slices: ", N_configs)
         _wavelengths = get_wavelengths(system, info=False)
         N_waves = _wavelengths.shape[0]
         # field_points = get_fields(system, info=False)
@@ -916,13 +916,13 @@ class AnalysisGeneric(object):
         # some analysis may be [spaxels_per_slice, N_slices, N_waves] such as an RMS WFE map
         # others might be [N_fields, N_rays, N_slices, N_waves] such as a Spot Diagram
 
-        print("\nDynamically creating Global Variables to store results")
+        # print("\nDynamically creating Global Variables to store results")
         for _name, _shape in zip(results_names, results_shapes):
-            print("Variable: %s with shape (N_waves, N_configs) + " % _name, _shape)
+            # print("Variable: %s with shape (N_waves, N_configs) + " % _name, _shape)
             globals()[_name] = np.empty((N_waves, N_slices) + _shape)
             # print(globals()[_name].shape)
 
-        print("\nApplying 'analysis_function': ", analysis_function.__name__)
+        # print("\nApplying 'analysis_function': ", analysis_function.__name__)
         print("At Surface #%d | Image Plane is #%d" % (surface, N_surfaces - 1))
         print("For Wavelength Numbers: ", wavelength_idx)
         print("For Configurations %d -> %d" % (configurations[0], configurations[-1]))
@@ -2190,44 +2190,44 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
         # print("Ensquared Energy: %.3f" % EE)
         #
 
-        if config in [1, 2, 3, 4, 5, 6] and wave_idx in [1, 2, 3, 4, 5]:
-
-            print("\nTracing %d rays to calculate Ensquared Energy" % (N_rays))
-            fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
-            # ax1.scatter(px, py, s=5, color='red')
-            ax1.scatter(px[valid_both], py[valid_both], s=5, color='lime')
-            ax1.set_xlabel(r'$P_x$')
-            ax1.set_ylabel(r'$P_y$')
-            ax1.set_xlim([-1, 1])
-            ax1.set_ylim([-1, 1])
-            ax1.set_title(r'Pupil Plane | %s rays' % N_rays)
-            ax1.set_aspect('equal')
-
-            sx, sy = slicer_xy[:, 0], slicer_xy[:, 1]
-            scx, scy = np.mean(sx), np.mean(sy)
-            ax2.scatter(sx, sy, s=3, color='red')
-            ax2.scatter(sx[valid_both], sy[valid_both], s=3, color='blue')
-            # ax2.scatter(scx, scy, s=8, color='red')
-            ax2.axhline(y=scy + 1.0, color='black', linestyle='--')
-            ax2.axhline(y=scy - 1.0, color='black', linestyle='--')
-            ax2.set_xlabel(r'Slicer X [mm]')
-            ax2.set_ylabel(r'Slicer Y [mm]')
-            ax2.set_xlim([scx - 2, scx + 2])
-            ax2.set_ylim([scy - 2, scy + 2])
-            ax2.set_title(r'Image Slicer | $\pm$1.0 mm wrt Centroid')
-            ax2.set_aspect('equal')
-
-            ax3.scatter(valid_det_x, valid_det_y, s=3, color='green')
-            ax3.scatter(vignetted[:, 0], vignetted[:, 1], s=3, color='orange')
-            ax3.axvline(x=sdx + det_pix, color='black', linestyle='--')
-            ax3.axvline(x=sdx - det_pix, color='black', linestyle='--')
-            ax3.set_xlabel(r'Detector X [mm]')
-            ax3.set_ylabel(r'Detector Y [mm]')
-            ax3.set_xlim([sdx - 2*det_pix, sdx + 2*det_pix])
-            ax3.set_ylim([sdy - 2*det_pix, sdy + 2*det_pix])
-            ax3.set_title(r'Detector Plane | $\pm$15 $\mu$m wrt Centroid')
-            ax3.set_aspect('equal')
-        plt.show()
+        # if config in [1, 2, 3, 4, 5, 6] and wave_idx in [1, 2, 3, 4, 5]:
+        #
+        #     print("\nTracing %d rays to calculate Ensquared Energy" % (N_rays))
+        #     fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
+        #     # ax1.scatter(px, py, s=5, color='red')
+        #     ax1.scatter(px[valid_both], py[valid_both], s=5, color='lime')
+        #     ax1.set_xlabel(r'$P_x$')
+        #     ax1.set_ylabel(r'$P_y$')
+        #     ax1.set_xlim([-1, 1])
+        #     ax1.set_ylim([-1, 1])
+        #     ax1.set_title(r'Pupil Plane | %s rays' % N_rays)
+        #     ax1.set_aspect('equal')
+        #
+        #     sx, sy = slicer_xy[:, 0], slicer_xy[:, 1]
+        #     scx, scy = np.mean(sx), np.mean(sy)
+        #     ax2.scatter(sx, sy, s=3, color='red')
+        #     ax2.scatter(sx[valid_both], sy[valid_both], s=3, color='blue')
+        #     # ax2.scatter(scx, scy, s=8, color='red')
+        #     ax2.axhline(y=scy + 1.0, color='black', linestyle='--')
+        #     ax2.axhline(y=scy - 1.0, color='black', linestyle='--')
+        #     ax2.set_xlabel(r'Slicer X [mm]')
+        #     ax2.set_ylabel(r'Slicer Y [mm]')
+        #     ax2.set_xlim([scx - 2, scx + 2])
+        #     ax2.set_ylim([scy - 2, scy + 2])
+        #     ax2.set_title(r'Image Slicer | $\pm$1.0 mm wrt Centroid')
+        #     ax2.set_aspect('equal')
+        #
+        #     ax3.scatter(valid_det_x, valid_det_y, s=3, color='green')
+        #     ax3.scatter(vignetted[:, 0], vignetted[:, 1], s=3, color='orange')
+        #     ax3.axvline(x=sdx + det_pix, color='black', linestyle='--')
+        #     ax3.axvline(x=sdx - det_pix, color='black', linestyle='--')
+        #     ax3.set_xlabel(r'Detector X [mm]')
+        #     ax3.set_ylabel(r'Detector Y [mm]')
+        #     ax3.set_xlim([sdx - 2*det_pix, sdx + 2*det_pix])
+        #     ax3.set_ylim([sdy - 2*det_pix, sdy + 2*det_pix])
+        #     ax3.set_title(r'Detector Plane | $\pm$15 $\mu$m wrt Centroid')
+        #     ax3.set_aspect('equal')
+        # plt.show()
 
 
         return [EE, obj_xy, [scx, scy], [sdx, sdy]]
@@ -2446,20 +2446,20 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
         psf_diffr = diffraction.add_diffraction(psf_geo, PSF_window, spaxel_scale, wavelength)
         # psf_diffr = add_diffraction(psf_geo, spaxel_scale, wavelength)
 
-        # fig, (ax1, ax2) = plt.subplots(1, 2)
-        # img1 = ax1.imshow(psf_geo, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
-        # plt.colorbar(img1, ax=ax1, orientation='horizontal')
-        # ax1.set_xlabel(r'X [mm]')
-        # ax1.set_ylabel(r'Y [mm]')
-        # ax1.set_title(r'Geometric PSF estimate')
-        #
-        # img2 = ax2.imshow(psf_diffr, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
-        # plt.colorbar(img2, ax=ax2, orientation='horizontal')
-        # ax2.set_xlabel(r'X [mm]')
-        # ax2.set_ylabel(r'Y [mm]')
-        # ax2.set_title(r'Diffraction PSF')
-        #
-        # plt.show()
+        fig, (ax1, ax2) = plt.subplots(1, 2)
+        img1 = ax1.imshow(psf_geo, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
+        plt.colorbar(img1, ax=ax1, orientation='horizontal')
+        ax1.set_xlabel(r'X [mm]')
+        ax1.set_ylabel(r'Y [mm]')
+        ax1.set_title(r'Geometric PSF estimate')
+
+        img2 = ax2.imshow(psf_diffr, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
+        plt.colorbar(img2, ax=ax2, orientation='horizontal')
+        ax2.set_xlabel(r'X [mm]')
+        ax2.set_ylabel(r'Y [mm]')
+        ax2.set_title(r'Diffraction PSF')
+
+        plt.show()
 
 
         # cross_psf = pixelate_crosstalk_psf(psf, PSF_window, N_points)
@@ -2473,7 +2473,7 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
         # Fit the PSF to a 2D Gaussian
         fwhm_x, fwhm_y, theta = diffraction.fit_psf_to_gaussian(xx=xx_grid, yy=yy_grid, psf_data=psf_diffr, x0=cent_x, y0=cent_y)
         # sigmaX, sigmaY, theta = fit_gaussian(xx=xx_grid, yy=yy_grid, data=psf_diffr, x0=cent_x, y0=cent_y)
-        # print("FWHM_x: %.1f | FWHM_y: %.1f | Theta: %.1f" % (fwhm_x, fwhm_y, np.rad2deg(theta)))
+        print("FWHM_x: %.1f | FWHM_y: %.1f | Theta: %.1f" % (fwhm_x, fwhm_y, np.rad2deg(theta)))
 
         # fwhm_x = 2 * np.sqrt(2 * np.log(2)) * sigmaX * 1000
         # # fwhm_x_cross = 2 * np.sqrt(2 * np.log(2)) * sigmaX_cross * 1000
@@ -2558,8 +2558,9 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
         # read the file options
         file_list, sett_list = create_zemax_file_list(which_system=files_opt['which_system'], AO_modes=files_opt['AO_modes'],
                                            scales=files_opt['scales'], IFUs=files_opt['IFUs'], grating=files_opt['grating'])
-        # print(settings)
+        print(file_list)
 
+        results = []
         for zemax_file, settings in zip(file_list, sett_list):
 
             # Clear the Cache for the Airy Pattern function
@@ -2574,6 +2575,7 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
                                              wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
                                              surface=surface, px=px, py=py, spaxel_scale=spaxel_scale,
                                              N_points=N_points, PSF_window=PSF_window)
+            results.append(list_results)
 
 
             geo_fwhm, psf_cube, obj_xy, foc_xy, wavelengths = list_results
@@ -2663,7 +2665,7 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
             #     #     plt.pause(0.5)
             #     #     plt.close()
 
-        return list_results
+        return results
 
 class RaytraceAnalysis(AnalysisGeneric):
     """

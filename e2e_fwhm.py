@@ -17,7 +17,7 @@ import matplotlib.tri as tri
 import pandas as pd
 import seaborn as sns
 
-def fwhm_psf_detector(zosapi, mode, spaxel_scale, grating, N_waves, N_rays):
+def fwhm_psf_detector(zosapi, mode, spaxel_scale, grating, N_configs, N_waves, N_rays):
     """
     Calculate the FWHM PSF at the Detector Plane
     in both directions, acrosss and along the Slices
@@ -30,6 +30,11 @@ def fwhm_psf_detector(zosapi, mode, spaxel_scale, grating, N_waves, N_rays):
     :return:
     """
 
+    if mode == 'IFS':
+        ao_modes = []
+    elif mode == 'HARMONI':
+        ao_modes = ['NOAO']
+
     analysis = e2e.GeometricFWHM_PSF_Analysis(zosapi=zosapi)
 
     ifu_sections = ['AB', 'CD', 'EF', 'GH']
@@ -40,19 +45,28 @@ def fwhm_psf_detector(zosapi, mode, spaxel_scale, grating, N_waves, N_rays):
     if not os.path.exists(analysis_dir):
         os.mkdir(analysis_dir)
 
+    wavelength_idx = np.linspace(1, 23, N_waves).astype(int)
+    # Select the config index. Using all of them takes forever
+    # We jump every N_configs
+    odd_configs = np.arange(1, 76, 2)[::N_configs]
+    even_configs = odd_configs + 1
+    configs = list(np.concatenate([odd_configs, even_configs]))
+    print("Total Configurations: ", len(configs))
+
     fx, fy = [], []
     focal_coord = []
     for ifu_section in ifu_sections:
-        options = {'which_system': mode, 'AO_modes': [], 'scales': [spaxel_scale], 'IFUs': [ifu_section],
+        options = {'which_system': mode, 'AO_modes': ao_modes, 'scales': [spaxel_scale], 'IFUs': [ifu_section],
                    'grating': [grating]}
-        focal_plane = e2e.focal_planes['IFS'][spaxel_scale][ifu_section]['DET']
+        focal_plane = e2e.focal_planes[mode][spaxel_scale][ifu_section]['DET']
 
-        wavelength_idx = np.linspace(1, 23, N_waves).astype(int)
+
         list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options, results_path=results_path,
-                                                wavelength_idx=wavelength_idx, configuration_idx=None, surface=focal_plane,
+                                                wavelength_idx=wavelength_idx, configuration_idx=configs, surface=focal_plane,
                                                 N_rays=N_rays)
 
-        fwhm, psf_cube, obj_xy, foc_xy, wavelengths = list_results
+        # Only 1 list, no Monte Carlo
+        fwhm, psf_cube, obj_xy, foc_xy, wavelengths = list_results[0]
         fwhm_x, fwhm_y = fwhm[:, :, 0].flatten(), fwhm[:, :, 1].flatten()
         fx.append(fwhm_x)
         fy.append(fwhm_y)
@@ -62,15 +76,15 @@ def fwhm_psf_detector(zosapi, mode, spaxel_scale, grating, N_waves, N_rays):
 
     return fx, fy, focal_coord
 
-def fwhm_all_gratings(zosapi, spaxel_scale, grating_list, N_waves, N_rays):
+def fwhm_all_gratings(zosapi, mode, spaxel_scale, grating_list, N_configs, N_waves, N_rays):
 
     fx_grating, fy_grating = [], []
     minX, minY = [], []
     meanX, meanY = [], []
     maxX, maxY = [], []
     for grating in grating_list:
-        fx, fy, focal_coord = fwhm_psf_detector(zosapi=zosapi, spaxel_scale=spaxel_scale, grating=grating,
-                                                            N_waves=N_waves, N_rays=N_rays)
+        fx, fy, focal_coord = fwhm_psf_detector(zosapi=zosapi, mode=mode, spaxel_scale=spaxel_scale, grating=grating,
+                                                N_configs=N_configs, N_waves=N_waves, N_rays=N_rays)
 
         print("\nFor Spectral band %s" % grating)
         print("FWHM PSF results: ")
@@ -233,20 +247,22 @@ if __name__ == """__main__""":
     # Create a Python Standalone Application
     psa = e2e.PythonStandaloneApplication()
 
-    files_path = os.path.abspath("D:\End to End Model\April_2020")
-    results_path = os.path.abspath("D:\End to End Model\Results_April")
+    files_path = os.path.abspath("D:\End to End Model\June_2020")
+    results_path = os.path.abspath("D:\End to End Model\Results_June")
 
     analysis_dir = os.path.join(results_path, 'FWHM')
     print("Analysis Results will be saved in folder: ", analysis_dir)
     if not os.path.exists(analysis_dir):
         os.mkdir(analysis_dir)
 
-    gratings = ['IZ', 'J', 'IZJ', 'Z_HIGH', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
-    # gratings = ['HK']
+    mode = 'HARMONI'
+    # gratings = ['IZ', 'J', 'IZJ', 'Z_HIGH', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
+    gratings = ['HK']
 
     spaxel_scale = '4x4'
 
-    fx, fy, stats = fwhm_all_gratings(zosapi=psa, spaxel_scale=spaxel_scale, grating_list=gratings, N_waves=3, N_rays=500)
+    fx, fy, stats = fwhm_all_gratings(zosapi=psa, mode=mode, spaxel_scale=spaxel_scale, grating_list=gratings,
+                                      N_configs=5, N_waves=5, N_rays=500)
 
     plt.show()
 

@@ -512,7 +512,7 @@ if __name__ == """__main__""":
 
     gratings = ['Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
     mode = 'HARMONI'
-    for spaxel_scale in ['10x10']:
+    for spaxel_scale in ['4x4']:
 
         rms_grating = []
         for grating in gratings:

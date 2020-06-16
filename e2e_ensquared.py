@@ -14,7 +14,7 @@ import e2e_analysis as e2e
 import matplotlib.pyplot as plt
 import matplotlib.tri as tri
 
-def detector_ensquared_energy(zosapi, spaxel_scale, grating, N_rays, files_path, results_path):
+def detector_ensquared_energy(zosapi, mode, spaxel_scale, grating, N_rays, files_path, results_path):
     """
     Calculate the Ensquared Energy at the detector plane for all 4 IFU channels
     The Ensquared Energy is calculated for the Field Point at the centre of the slice
@@ -29,12 +29,17 @@ def detector_ensquared_energy(zosapi, spaxel_scale, grating, N_rays, files_path,
     :return:
     """
 
+    if mode == 'IFS':
+        ao_modes = []
+    elif mode == 'HARMONI':
+        ao_modes = ['NOAO']
+
     analysis = e2e.EnsquaredEnergyAnalysis(zosapi=zosapi)
 
     ifu_sections = ['AB', 'CD', 'EF', 'GH']
     fig, axes = plt.subplots(2, 2, figsize=(15, 10))
     for i, ifu in enumerate(ifu_sections):
-        options = {'which_system': 'IFS', 'AO_modes': [], 'scales': [spaxel_scale], 'IFUs': [ifu],
+        options = {'which_system': mode, 'AO_modes': ao_modes, 'scales': [spaxel_scale], 'IFUs': [ifu],
                    'grating': [grating]}
         list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options, results_path=results_path,
                                                 wavelength_idx=None, configuration_idx=None, N_rays=N_rays)
@@ -89,16 +94,17 @@ if __name__ == """__main__""":
     # Create a Python Standalone Application
     psa = e2e.PythonStandaloneApplication()
 
-    files_path = os.path.abspath("D:\End to End Model\April_2020")
-    results_path = os.path.abspath("D:\End to End Model\Results_April")
+    files_path = os.path.abspath("D:\End to End Model\June_2020")
+    results_path = os.path.abspath("D:\End to End Model\Results_June")
 
-    spaxel_scale = '10x10'
+    mode = 'HARMONI'
+    spaxel_scale = '20x20'
     gratings = ['Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
     # gratings = ['H']
     N_rays = 1000
 
     for grating in gratings:
-        detector_ensquared_energy(zosapi=psa, spaxel_scale=spaxel_scale, grating=grating, N_rays=N_rays,
+        detector_ensquared_energy(zosapi=psa, mode=mode, spaxel_scale=spaxel_scale, grating=grating, N_rays=N_rays,
                                files_path=files_path, results_path=results_path)
 
     # Some info on speed and number of rays:
