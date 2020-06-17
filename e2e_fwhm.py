@@ -35,7 +35,7 @@ def fwhm_psf_detector(zosapi, mode, spaxel_scale, grating, N_configs, N_waves, N
     elif mode == 'HARMONI':
         ao_modes = ['NOAO']
 
-    analysis = e2e.GeometricFWHM_PSF_Analysis(zosapi=zosapi)
+    analysis = e2e.FWHM_PSF_Analysis(zosapi=zosapi)
 
     ifu_sections = ['AB', 'CD', 'EF', 'GH']
     # ifu_sections = ['AB', 'CD']

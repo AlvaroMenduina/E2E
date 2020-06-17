@@ -80,11 +80,24 @@ focal_planes['HARMONI'] = {'4x4': {'AB': {'IS': 96, 'DET': None},
                                      'GH': {'IS': 84, 'DET': None}}
                            }
 
-# focal_planes = {}
-# focal_planes['IFS'] = {'60x30': {'AB': {'PO': 31},
-#                                  'CD': {'PO': 31},
-#                                  'EF': {'PO': 31},
-#                                  'GH': {'PO': 31}}}
+# Define the Spaxel Sizes [um] for each Spaxel Scale at each Focal Plane
+spaxel_sizes = {}
+spaxel_sizes["60x30"] = {"FPRS": [97.656, 195.313],
+                              "PO": [195.313, 390.625],
+                              "IFU": [65, 130],
+                              "SPEC": [15, 30]}
+spaxel_sizes["20x20"] = {"FPRS": [65.104, 65.104],
+                              "PO": [195.313, 390.625],
+                              "IFU": [65, 130],
+                              "SPEC": [15, 30]}
+spaxel_sizes["10x10"] = {"FPRS": [35.552, 35.552],
+                              "PO": [195.313, 390.625],
+                              "IFU": [65, 130],
+                              "SPEC": [15, 30]}
+spaxel_sizes["4x4"] = {"FPRS": [13.021, 13.021],
+                            "PO": [195.313, 390.625],
+                            "IFU": [65, 130],
+                            "SPEC": [15, 30]}
 
 
 # Keywords for Focal Plane are:
@@ -1803,263 +1816,33 @@ class RMSSpotAnalysis(AnalysisGeneric):
 
         return
 
-class EnsquaredEnergyCustomAnalysis(AnalysisGeneric):
-    """
-    Ensquared Energy calculations done by
-    raytracing and counting rays inside a given box
-    so that we can apply it to HARMONI where the spaxels
-    are rectangular
-    """
-    def __init__(self, zosapi):
-        super().__init__(zosapi=zosapi)
-
-        # Define the Spaxel Sizes [um] for each Spaxel Scale at each Focal Plane
-        self.spaxel_sizes = {}
-        self.spaxel_sizes["60x30"] = {"FPRS": [97.656, 195.313],
-                                      "PO": [195.313, 390.625],
-                                      "IFU": [65, 130],
-                                      "SPEC": [15, 30]}
-        self.spaxel_sizes["20x20"] = {"FPRS": [65.104, 65.104],
-                                      "PO": [195.313, 390.625],
-                                      "IFU": [65, 130],
-                                      "SPEC": [15, 30]}
-        self.spaxel_sizes["10x10"] = {"FPRS": [35.552, 35.552],
-                                      "PO": [195.313, 390.625],
-                                      "IFU": [65, 130],
-                                      "SPEC": [15, 30]}
-        self.spaxel_sizes["4x4"] = {"FPRS": [13.021, 13.021],
-                                      "PO": [195.313, 390.625],
-                                      "IFU": [65, 130],
-                                      "SPEC": [15, 30]}
-        return
-
-    def analysis_function_ensquared_energy(self, system, wave_idx, config, surface, scale, focal_plane, N_rays):
-
-        # Set Current Configuration
-        system.MCE.SetCurrentConfiguration(config)
-
-        # Get the Field Points for that configuration
-        sysField = system.SystemData.Fields
-
-        N_fields = sysField.NumberOfFields
-        # check that the field is normalized correctly
-        if sysField.Normalization != constants.FieldNormalizationType_Radial:
-            sysField.Normalization = constants.FieldNormalizationType_Radial
-
-        # Loop over the fields to get the Normalization Radius
-        r_max = np.max([np.sqrt(sysField.GetField(i).X ** 2 +
-                                sysField.GetField(i).Y ** 2) for i in np.arange(1, N_fields + 1)])
-
-        fy_mean = np.mean([sysField.GetField(i).Y for i in np.arange(1, N_fields + 1)])
-        fx_mean = 1/2 * np.sum([sysField.GetField(i).X for i in np.arange(1, N_fields + 1)])
-
-        ## Add some extra field to get a better sampling
-        sysField.AddField(fx_mean, fy_mean, 1)
-        sysField.AddField(fx_mean / 3.0, fy_mean, 1)
-        N_fields = sysField.NumberOfFields
-
-
-        # Pupil Rays
-        px = np.linspace(-1, 1, N_rays, endpoint=True)
-        pxx, pyy = np.meshgrid(px, px)
-        pupil_mask = np.sqrt(pxx**2 + pyy**2) <= 1.0
-        px, py = pxx[pupil_mask], pyy[pupil_mask]
-        # How many rays are actually inside the pupil aperture?
-        N_rays_inside = px.shape[0]
-
-        XY = np.empty((N_fields, N_rays ** 2, 2))
-        XY[:] = np.NaN          # Fill it with Nan so we can discard the rays outside the pupil
-
-        EE = np.zeros(N_fields)
-        obj_xy = np.zeros((N_fields, 2))        # (fx, fy) coordinates
-        foc_xy = np.empty((N_fields, 2))        # raytrace results of the Centroid
-
-        # Loop over each Field computing the Spot Diagram
-        for j in range(N_fields):
-
-            fx, fy = sysField.GetField(j + 1).X, sysField.GetField(j + 1).Y
-            hx, hy = fx / r_max, fy / r_max      # Normalized field coordinates (hx, hy)
-
-            obj_xy[j, :] = [fx, fy]
-
-            raytrace = system.Tools.OpenBatchRayTrace()
-            # remember to specify the surface to which you are tracing!
-            normUnPolData = raytrace.CreateNormUnpol(N_rays_inside, constants.RaysType_Real, surface)
-
-            for (p_x, p_y) in zip(px, py):
-                # Add the ray to the RayTrace
-                normUnPolData.AddRay(wave_idx, hx, hy, p_x, p_y, constants.OPDMode_None)
-
-            # Run the RayTrace for the whole Slice
-            CastTo(raytrace, 'ISystemTool').RunAndWaitForCompletion()
-            normUnPolData.StartReadingResults()
-            for i in range(N_rays_inside):
-                output = normUnPolData.ReadNextResult()
-                if output[2] == 0 and output[3] == 0:
-                    XY[j, i, 0] = output[4]
-                    XY[j, i, 1] = output[5]
-
-            normUnPolData.ClearData()
-            CastTo(raytrace, 'ISystemTool').Close()
-
-            # Calculate Centroid
-            cent_x, cent_y = np.nanmean(XY[j, :, 0]), np.nanmean(XY[j, :, 1])
-            foc_xy[j, :] = [cent_x, cent_y]
-
-            # Get the size of the spaxel
-            spax_x, spax_y = self.spaxel_sizes[scale][focal_plane]      # in microns
-            spax_x /= 1000
-            spax_y /= 1000
-
-            xmin, xmax = cent_x - spax_x, cent_x + spax_x
-            ymin, ymax = cent_y - spax_y, cent_y + spax_y
-
-            # Find out how many rays we need to ignore bc they are outside the pupil
-
-            N_good = np.isfinite(XY[j, :, 0]).sum()
-            inside = 0
-            for i, is_finite in enumerate(np.isfinite(XY[j, :, 0])):
-                # print(i, is_nan)
-                if is_finite == True:      # a proper number
-                    x, y = XY[j, i, 0], XY[j, i, 1]
-                    #TODO: fix the size of the spaxel
-                    # print(i)
-                    if xmin < x < xmax and ymin < y < ymax:     # Inside
-                        inside += 1
-            EE[j] = inside / N_good
-
-            # fig, ax1 = plt.subplots(1, 1)
-            # ax1.scatter(XY[j, :, 0], XY[j, :, 1], s=4)
-            # square = Rectangle((cent_x - spax_x/2, cent_y - spax_y/2), spax_x, spax_y, linestyle='--', fill=None, color='black')
-            # ax1.add_patch(square)
-            # # ax1.set_xlim([xmin, xmax])
-            # # ax1.set_ylim([ymin, ymax])
-            # plt.title("Field #%d (%.3f, %.3f)" % (j + 1, fx, fy))
-
-        # print(EE.shape)
-
-        # Remember to remove the extra fields otherwise they pile up
-        sysField.RemoveField(N_fields)
-        sysField.RemoveField(N_fields - 1)
-
-
-        return [EE, obj_xy, foc_xy]
-
-    def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
-                        configuration_idx=None, surface=None, scale="60x30", focal_plane="PO", N_rays=30):
-        """
-
-
-        :return:
-        """
-
-        # We want the result to produce as output: the RMS WFE array, and the RayTrace at both Object and Focal plane
-        results_names = ['EE', 'OBJ_XY', 'FOC_XY']
-        # we need to give the shapes of each array to self.run_analysis
-        results_shapes = [(5,), (5, 2), (5, 2)]
-
-        # read the file options
-        file_list, settings = create_zemax_file_list(which_system=files_opt['which_system'], AO_modes=files_opt['AO_modes'],
-                                           scales=files_opt['scales'], IFUs=files_opt['IFUs'], grating=files_opt['grating'])
-
-        for zemax_file in file_list:
-
-            list_results = self.run_analysis(analysis_function=self.analysis_function_ensquared_energy,
-                                             files_dir=files_dir, zemax_file=zemax_file, results_path=results_path,
-                                             results_shapes=results_shapes, results_names=results_names,
-                                             wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
-                                             surface=surface, scale=scale, focal_plane=focal_plane, N_rays=N_rays)
-
-            ensq_ener, obj_xy, foc_xy, wavelengths = list_results
-
-            min_ee_wave = np.min(ensq_ener, axis=(1, 2))
-            max_ee_wave = np.max(ensq_ener, axis=(1, 2))
-            plt.figure()
-            plt.plot(wavelengths, min_ee_wave, label='Min')
-            plt.plot(wavelengths, max_ee_wave, label='Max')
-            plt.legend()
-            plt.xlabel(r'Wavelength [$\mu$m]')
-            plt.ylim([0.90, 1.1])
-            plt.ylabel(r'Ensquared Energy [ ]')
-
-            print("\nEnsquared Energy Results")
-            min_ee = np.min(ensq_ener)
-            max_ee = np.max(ensq_ener)
-            print("Min: %.3f , Max: %.3f" % (min_ee, max_ee))
-
-            N_waves = len(wavelengths)
-            if wavelength_idx is None:
-                wave_idx = np.arange(1, N_waves + 1)
-            else:
-                wave_idx = wavelength_idx
-
-            # Post-Processing the results
-            file_name = zemax_file.split('.')[0]
-            results_dir = os.path.join(results_path, file_name)
-            surface_number = str(surface) if surface is not None else '_IMG'
-
-            #
-            # ### Object Space Plots
-            # for k in range(N_waves):
-            #     x, y = obj_xy[k, :, :, 0].flatten(), obj_xy[k, :, :, 1].flatten()
-            #     z = ensq_ener[k].flatten()
-            #
-            #     plt.figure()
-            #     plt.tricontourf(x, y, z, cmap='Blues')
-            #     plt.clim(vmin=0.5, vmax=np.max(z))
-            #     plt.plot(x, y, 'ko', ms=2)
-            #     plt.xlabel(r'Object $f_x$ [mm]')
-            #     plt.ylabel(r'Object $f_y$ [mm]')
-            #     plt.colorbar(orientation='horizontal')
-            #     plt.xlim([-1.05 * x.min(), 1.05 * x.min()])
-            #
-            #     fig_name = file_name + '_OBJ_SURF_' + surface_number + '_ENSQ_ENER_WAVE%d' % (wave_idx[k])
-            #     plt.title(fig_name)
-            #
-            #     plt.axes().set_aspect('equal')
-            #     if os.path.isfile(os.path.join(results_dir, fig_name)):
-            #         os.remove(os.path.join(results_dir, fig_name))
-            #     plt.savefig(os.path.join(results_dir, fig_name))
-            #     plt.show(block=False)
-            #     plt.pause(0.5)
-            #     plt.close()
-            #
-            # if focal_plane == "SPEC":
-            #     ### Focal Plane Plots
-            #     x, y = foc_xy[:, :, :, 0].flatten(), foc_xy[:, :, :, 1].flatten()
-            #     z = ensq_ener.flatten()
-            #
-            #     plt.figure()
-            #     img = plt.tricontourf(x, y, z, cmap='Blues')
-            #     img.set_clim(vmin=0.5, vmax=1.0)
-            #     plt.scatter(x, y, s=2, color='white')
-            #     plt.xlabel(r'Focal Plane X [mm]')
-            #     plt.ylabel(r'Focal Plane Y [mm]')
-            #     plt.colorbar(img, orientation='horizontal')
-            #     plt.xlim([-1.05 * x.min(), 1.05 * x.min()])
-            #     plt.ylim([-1.05 * y.min(), 1.05 * y.min()])
-            #     fig_name = file_name + '_FOC' + surface_number + '_ENSQ_ENER'
-            #     plt.title(fig_name)
-            #     plt.axes().set_aspect('equal')
-            #     if os.path.isfile(os.path.join(results_dir, fig_name)):
-            #         os.remove(os.path.join(results_dir, fig_name))
-            #     plt.savefig(os.path.join(results_dir, fig_name))
-            #     plt.show(block=False)
-            #     plt.pause(0.5)
-            #     plt.close()
-
-        return list_results
-
-
-
 class EnsquaredEnergyAnalysis(AnalysisGeneric):
     """
-    Ensquared Energy using the Zemax operand GENF
-    Only works for SQUARE cases
+    Geometric Ensquared Energy analysis for the HARMONI E2E files
+    For the calculation of EE we use a custom approach based on the
+    specific HARMONI requirements, which only cares about SPATIAL direction
+    and ignores the SPECTRAL direction
     """
 
     @staticmethod
     def analysis_function_ensquared_energy(system, wave_idx, config, surface, slicer_surface, px, py):
+        """
+        Analysis function to calculate the Geometric Ensquared Energy
+
+        We return a list containing the following data:
+            - Ensquared Energy value
+            - Object Coordinates (field point at the centre of the slice)
+            - Raytrace results both at the Image Slicer and Detector plane in the form of centroid coordinates
+
+        :param system: the Zemax system as given by the API
+        :param wave_idx: Zemax wavelength index
+        :param config: Zemax configuration / slice
+        :param surface: Not used, we always use the last surface (Detector Plane)
+        :param slicer_surface: Zemax surface number for the Image Slicer
+        :param px: pupil X coordinates of the rays to be traced
+        :param py: pupil Y coordinates of the rays to be traced
+        :return:
+        """
 
         # Set Current Configuration
         system.MCE.SetCurrentConfiguration(config)
@@ -2086,20 +1869,21 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
 
         N_rays = px.shape[0]
 
+        # We need to trace rays up to the Image Slicer and then up to the Detector
         slicer_xy = np.empty((N_rays, 2))
         detector_xy = np.empty((N_rays, 2))
 
+        # (1) Run the raytrace up to the IMAGE SLICER
         raytrace_slicer = system.Tools.OpenBatchRayTrace()
         # remember to specify the surface to which you are tracing!
         rays_slicer = raytrace_slicer.CreateNormUnpol(N_rays, constants.RaysType_Real, slicer_surface)
-        for (p_x, p_y) in zip(px, py):
-            # Add the ray to the RayTrace
+        for (p_x, p_y) in zip(px, py):      # Add the ray to the RayTrace
             rays_slicer.AddRay(wave_idx, hx, hy, p_x, p_y, constants.OPDMode_None)
 
         CastTo(raytrace_slicer, 'ISystemTool').RunAndWaitForCompletion()
         rays_slicer.StartReadingResults()
         checksum_slicer = 0
-        for i in range(N_rays):
+        for i in range(N_rays):     # Get Raytrace results at the Image Slicer
             output = rays_slicer.ReadNextResult()
             if output[2] == 0 and output[3] == 0:
                 slicer_xy[i, 0] = output[4]
@@ -2111,7 +1895,7 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
         rays_slicer.ClearData()
         # CastTo(raytrace_slicer, 'ISystemTool').Close()
 
-        # Count how many rays fall inside a +- 1 mm window in Y
+        # Count how many rays fall inside a +- 1 mm window in Y, wrt the centroid
         scx, scy = np.mean(slicer_xy[:, 0]), np.mean(slicer_xy[:, 1])
         below_slicer = slicer_xy[:, 1] < scy + 1.0
         above_slicer = slicer_xy[:, 1] > scy - 1.0
@@ -2127,9 +1911,10 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
         for (p_x, p_y) in zip(px, py):
             rays_detector.AddRay(wave_idx, hx, hy, p_x, p_y, constants.OPDMode_None)
         CastTo(raytrace_slicer, 'ISystemTool').RunAndWaitForCompletion()
+
         rays_detector.StartReadingResults()
         checksum_detector = 0
-        index_valid_detector = []
+        index_valid_detector = []       # Valid means they make it to the detector even if vignetted at the Slicer
         vignetted = []
         index_vignetted = []
         for i in range(N_rays):
@@ -2159,6 +1944,8 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
         rays_detector.ClearData()
         CastTo(raytrace_slicer, 'ISystemTool').Close()
 
+        # (3) Calculate the ENSQUARED ENERGY
+
         # We only count the rays that where inside the slicer to begin with and the ones that make it to the detector
         valid_both = []
         for i in range(N_rays):
@@ -2168,12 +1955,12 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
         valid_det_x = detector_xy[:, 0][valid_both]
         valid_det_y = detector_xy[:, 1][valid_both]
 
-        # Now we calculate which detector rays fall inside a 2x pixel box along X
-        sdx = np.mean(valid_det_x)
-        sdy = np.mean(valid_det_y)
+        # Now, out of the VALID rays, we calculate which detector rays fall inside a 2x pixel box along X
+        dcx = np.mean(valid_det_x)      # Detector Centroid X
+        dcy = np.mean(valid_det_y)
 
-        left_detector = valid_det_x < sdx + 0.25 * det_pix
-        right_detector = valid_det_x > sdx - 0.25 * det_pix
+        left_detector = valid_det_x < dcx + det_pix
+        right_detector = valid_det_x > dcx - det_pix
         inside_detector = (np.logical_and(left_detector, right_detector))
         total_detector = np.sum(inside_detector)
         EE = total_detector / N_rays
@@ -2225,24 +2012,23 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
         #     ax3.scatter(valid_det_x, valid_det_y, s=3, color='green')
         #     ax3.scatter(valid_det_x[index_vignetted], valid_det_y[index_vignetted], s=3, color='red')
         #     # ax3.scatter(vignetted[:, 0], vignetted[:, 1], s=3, color='orange')
-        #     ax3.axvline(x=sdx + det_pix, color='black', linestyle='--')
-        #     ax3.axvline(x=sdx - det_pix, color='black', linestyle='--')
+        #     ax3.axvline(x=dcx + det_pix, color='black', linestyle='--')
+        #     ax3.axvline(x=dcx - det_pix, color='black', linestyle='--')
         #     ax3.set_xlabel(r'Detector X [mm]')
         #     ax3.set_ylabel(r'Detector Y [mm]')
-        #     ax3.set_xlim([sdx - 2*det_pix, sdx + 2*det_pix])
-        #     ax3.set_ylim([sdy - 2*det_pix, sdy + 2*det_pix])
+        #     ax3.set_xlim([dcx - 2*det_pix, dcx + 2*det_pix])
+        #     ax3.set_ylim([dcy - 2*det_pix, dcy + 2*det_pix])
         #     ax3.set_title(r'Detector Plane | $\pm$15 $\mu$m wrt Centroid')
         #     ax3.set_aspect('equal')
         # plt.show()
 
-
-        return [EE, obj_xy, [scx, scy], [sdx, sdy]]
+        return [EE, obj_xy, [scx, scy], [dcx, dcy]]
 
     def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
                         configuration_idx=None, N_rays=500):
         """
         Function that loops over a given set of E2E model Zemax files, running the analysis
-        defined by self.analysis_function_rms_wfe
+        defined by self.analysis_function_ensquared_energy
 
 
         :param files_dir: path where the E2E model files are stored
@@ -2250,12 +2036,12 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
         :param results_path: path where we want to store the results
         :param wavelength_idx: list containing the Wavelength numbers we want to analyze. If None, we will use All
         :param configuration_idx: list containing the Configurations we want to analyze. If None, we will use All
-        :param surface: Zemax Surface number at which the analysis will be computed
+        :param N_rays: how many rays to use to calculate the Geometric Ensquared Energy
 
         :return:
         """
 
-        # We want the result to produce as output: the RMS WFE array, and the RayTrace at both Object and Focal plane
+        # We want the result to produce as output: Ensquared Energy, Object coords, Image Slicer and Detector centroids
         results_names = ['EE', 'OBJ_XY', 'SLI_XY', 'DET_XY']
         # we need to give the shapes of each array to self.run_analysis
         results_shapes = [(1,), (2,), (2,), (2,)]
@@ -2270,8 +2056,10 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
             system = settings['system']
             spaxel_scale = settings['scale']
             ifu = settings['ifu']
+            # We need to know what is the Surface Number for the Image Slicer in the Zemax file
             slicer_surface = focal_planes[system][spaxel_scale][ifu]['IS']
 
+            # Generate a set of random pupil rays
             px, py = define_pupil_sampling(r_obsc=0.2841, N_rays=N_rays, mode='random')
             print("Using %d rays" % N_rays)
 
@@ -2281,50 +2069,13 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
                                         wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
                                         slicer_surface=slicer_surface, px=px, py=py)
 
-            ensq_ener, obj_xy, slicer_xy, detector_xy, wavelengths = results
             list_results.append(results)
-
-            # # Post-Processing the results
-            # file_name = zemax_file.split('.')[0]
-            # results_dir = os.path.join(results_path, file_name)
-            # surface_number = str(surface) if surface is not None else '_IMG'
-            #
-            # for k in range(1):
-            #     x, y = obj_xy[k, :, :, 0].flatten(), obj_xy[k, :, :, 1].flatten()
-            #     z = ensq_ener[k].flatten()
-            #
-            #     # ngridx = 100
-            #     # xi = np.linspace(x.min(), x.max(), ngridx)
-            #     # yi = np.linspace(y.min(), y.max(), ngridx)
-            #     # zi = mlab.griddata(x, y, z, xi, yi, interp='linear')
-            #
-            #     plt.figure()
-            #     # triang = tri.Triangulation(x, y)
-            #     # plt.tricontour(x, y, z, 10, linewidths=0.5, colors='k')
-            #     plt.tricontourf(x, y, z, 25,
-            #                     cmap='Blues')
-            #     plt.clim(vmin=np.min(z), vmax=np.max(z))
-            #     plt.plot(x, y, 'ko', ms=2)
-            #     plt.xlabel(r'X [mm]')
-            #     plt.ylabel(r'Y [mm]')
-            #     fig_name = file_name + '_SURF_' + surface_number + '_ENSQ_ENER_WAVE%d' % (wavelength_idx[k])
-            #     plt.title(fig_name)
-            #     plt.colorbar(orientation='horizontal')
-            #     plt.xlim([-1.05 * x.min(), 1.05 * x.min()])
-            #
-            #     plt.axes().set_aspect('equal')
-            #     if os.path.isfile(os.path.join(results_dir, fig_name)):
-            #         os.remove(os.path.join(results_dir, fig_name))
-            #     plt.savefig(os.path.join(results_dir, fig_name))
-            #     plt.show(block=False)
-            #     plt.pause(0.5)
-            #     plt.close()
 
         return list_results
 
 
 
-class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
+class FWHM_PSF_Analysis(AnalysisGeneric):
     """
     Calculate the Geometric FWHM of the PSF
     by computing the spot diagrams, getting the contour plots
@@ -2785,118 +2536,6 @@ class RaytraceAnalysis(AnalysisGeneric):
                                              results_shapes=results_shapes, results_names=results_names,
                                              wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
                                              surface=surface, rays_per_slice=rays_per_slice)
-
-            obj_xy, foc_xy, global_xy, wavelengths = list_results
-
-            # For each file we save the list of results
-            # we could use that in a Monte Carlo analysis for example
-            results.append(list_results)
-
-        return results
-
-
-class EnsquaredDetector(AnalysisGeneric):
-
-    @staticmethod
-    def analysis_function_ensquared(system, wave_idx, config, surface, size, N_rays):
-
-        # Set Current Configuration
-        system.MCE.SetCurrentConfiguration(config)
-
-        # Get the Field Points for that configuration
-        sysField = system.SystemData.Fields
-        # check that the field is normalized correctly
-        if sysField.Normalization != constants.FieldNormalizationType_Radial:
-            sysField.Normalization = constants.FieldNormalizationType_Radial
-
-        N_fields = sysField.NumberOfFields
-
-        r_max = np.max([np.sqrt(sysField.GetField(i).X ** 2 +
-                                sysField.GetField(i).Y ** 2) for i in np.arange(1, N_fields + 1)])
-
-        # Get the Field Point at the centre of the Slice
-        fx, fy = sysField.GetField(2).X, sysField.GetField(2).Y
-        # Trace a Square around the centre point
-        x_min, x_max = fx - size/2, fx + size/2
-        y_min, y_max = fy - size/2, fy + size/2
-        x_up, y_up = np.linspace(x_min, x_max, N_rays), y_max * np.ones(N_rays)
-        x_down, y_down = np.linspace(x_min, x_max, N_rays), y_min * np.ones(N_rays)
-        x_left, y_left = x_min * np.ones(N_rays), np.linspace(y_min, y_max, N_rays)
-        x_right, y_right = x_max * np.ones(N_rays), np.linspace(y_min, y_max, N_rays)
-        x_mid, y_mid = fx * np.ones(N_rays), np.linspace(y_min, y_max, N_rays)
-
-        x = np.concatenate([x_down, x_right, x_up, x_left, x_mid])
-        y = np.concatenate([y_down, y_right, y_up, y_left, y_mid])
-        hx, hy = x / r_max, y / r_max
-
-        obj_xy = r_max * np.array([hx, hy]).T
-        foc_xy = np.empty((5*N_rays, 2))
-        local_xyz = np.empty((5*N_rays, 3))
-
-        raytrace = system.Tools.OpenBatchRayTrace()
-        normUnPolData = raytrace.CreateNormUnpol(5*N_rays, constants.RaysType_Real, surface)
-
-        # Loop over all Rays in the Slice
-        for i, (h_x, h_y) in enumerate(zip(hx, hy)):
-            # Add the ray to the RayTrace
-            normUnPolData.AddRay(wave_idx, h_x, h_y, 0, 0, constants.OPDMode_None)
-
-        # Run the RayTrace for the whole Slice
-        CastTo(raytrace, 'ISystemTool').RunAndWaitForCompletion()
-        normUnPolData.StartReadingResults()
-        checksum = 0
-        for i in range(5 * N_rays):
-            output = normUnPolData.ReadNextResult()
-            if output[2] == 0 and output[3] == 0:
-                local_xyz[i, 0] = output[4]
-                local_xyz[i, 1] = output[5]
-                local_xyz[i, 2] = output[6]
-
-                # Local Focal X Y
-                foc_xy[i, 0] = output[4]
-                foc_xy[i, 1] = output[5]
-                checksum += 1
-        print("Rays Traced: %d / %d" % (checksum, 5*N_rays))
-
-        normUnPolData.ClearData()
-        CastTo(raytrace, 'ISystemTool').Close()
-
-        # Get the transformation from Local to Global Coordinates
-        global_mat = system.LDE.GetGlobalMatrix(surface)
-        R11, R12, R13, R21, R22, R23, R31, R32, R33, X0, Y0, Z0 = global_mat[1:]
-        global_matrix = np.array([[R11, R12, R13],
-                                  [R21, R22, R23],
-                                  [R31, R32, R33]])
-        offset = np.array([X0, Y0, Z0])
-
-        # Transform from Local to Global and only save X and Y
-        global_xyz = (np.dot(global_matrix, local_xyz.T)).T + offset
-        global_xy = global_xyz[:, :2]
-
-        return [obj_xy, foc_xy, global_xy]
-
-    def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
-                        configuration_idx=None, surface=None, size=1.0, N_rays=100):
-
-
-        results_names = ['OBJ_XY', 'FOC_XY', 'GLOB_XY']
-        # we need to give the shapes of each array to self.run_analysis
-        results_shapes = [(5*N_rays, 2), (5*N_rays, 2), (5*N_rays, 2)]
-
-        # read the file options
-        file_list, sett_list = create_zemax_file_list(which_system=files_opt['which_system'],
-                                                      AO_modes=files_opt['AO_modes'], scales=files_opt['scales'],
-                                                      IFUs=files_opt['IFUs'], grating=files_opt['grating'])
-
-        # Loop over the Zemax files
-        results = []
-        for zemax_file, settings in zip(file_list, sett_list):
-
-            list_results = self.run_analysis(analysis_function=self.analysis_function_ensquared,
-                                             files_dir=files_dir, zemax_file=zemax_file, results_path=results_path,
-                                             results_shapes=results_shapes, results_names=results_names,
-                                             wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
-                                             surface=surface, size=size, N_rays=N_rays)
 
             obj_xy, foc_xy, global_xy, wavelengths = list_results
 

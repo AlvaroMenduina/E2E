@@ -1,10 +1,20 @@
 """
 
-Ensquared Energy analysis
+Geometric Ensquared Energy analysis
 
 
 Author: Alvaro Menduina
 Date: May 2020
+Modified: June 2020
+
+Description:
+With this script we calculate the Geometric Ensquared Energy for the E2E files
+at the Detector plane for a 2x2 spaxel box.
+
+You can select:
+    - The system MODE: IFS, HARMONI (with NOAO)
+    -
+
 
 """
 
@@ -14,7 +24,7 @@ import e2e_analysis as e2e
 import matplotlib.pyplot as plt
 import matplotlib.tri as tri
 
-def detector_ensquared_energy(zosapi, mode, spaxel_scale, grating, N_rays, files_path, results_path):
+def detector_ensquared_energy(zosapi, sys_mode, ao_modes, spaxel_scale, grating, N_rays, files_path, results_path):
     """
     Calculate the Ensquared Energy at the detector plane for all 4 IFU channels
     The Ensquared Energy is calculated for the Field Point at the centre of the slice
@@ -29,21 +39,24 @@ def detector_ensquared_energy(zosapi, mode, spaxel_scale, grating, N_rays, files
     :return:
     """
 
-    if mode == 'IFS':
-        ao_modes = []
-    elif mode == 'HARMONI':
-        ao_modes = ['NOAO']
+    analysis_dir = os.path.join(results_path, 'ENSQUARED ENERGY')
+    print("Analysis Results will be saved in folder: ", analysis_dir)
+    if not os.path.exists(analysis_dir):
+        os.mkdir(analysis_dir)
 
     analysis = e2e.EnsquaredEnergyAnalysis(zosapi=zosapi)
 
     ifu_sections = ['AB', 'CD', 'EF', 'GH']
     fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+
     for i, ifu in enumerate(ifu_sections):
-        options = {'which_system': mode, 'AO_modes': ao_modes, 'scales': [spaxel_scale], 'IFUs': [ifu],
+
+        options = {'which_system': sys_mode, 'AO_modes': ao_modes, 'scales': [spaxel_scale], 'IFUs': [ifu],
                    'grating': [grating]}
         list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options, results_path=results_path,
                                                 wavelength_idx=None, configuration_idx=None, N_rays=N_rays)
 
+        # No Monte Carlo so the list_results only contains 1 entry, for the IFU channel
         energy, obj_xy, slicer_xy, detector_xy, wavelengths = list_results[0]
 
         # Separate the Odd / Even configurations to avoid triangulating over the gap on the detector plane
@@ -77,12 +90,12 @@ def detector_ensquared_energy(zosapi, mode, spaxel_scale, grating, N_rays, files
         title = r'IFU-%s | %s mas | %s SPEC | EE min:%.2f max:%.2f' % (ifu, spaxel_scale, grating, min_ener, max_ener)
         ax.set_title(title)
 
-    fig_name = "ENSQUARED_ENERGY_DETECTOR_PO%s_SPEC_%s" % (spaxel_scale, grating)
-    if os.path.isfile(os.path.join(results_path, fig_name)):
-        os.remove(os.path.join(results_path, fig_name))
-    fig.savefig(os.path.join(results_path, fig_name))
+    save_path = os.path.join(results_path, analysis_dir)
+    fig_name = "ENSQ_ENERGY_DETECTOR_%s_SPEC_%s_MODE_%s" % (spaxel_scale, grating, sys_mode)
+    if os.path.isfile(os.path.join(save_path, fig_name)):
+        os.remove(os.path.join(save_path, fig_name))
+    fig.savefig(os.path.join(save_path, fig_name))
 
-    # plt.show()
     return
 
 
@@ -94,22 +107,27 @@ if __name__ == """__main__""":
     # Create a Python Standalone Application
     psa = e2e.PythonStandaloneApplication()
 
+    # Don't forget to specify where to find the E2E files and where to save results
     files_path = os.path.abspath("D:\End to End Model\June_2020")
     results_path = os.path.abspath("D:\End to End Model\Results_June")
 
-    mode = 'HARMONI'
+    # Adapt the parameters here: system mode, ao_modes, spaxel_scale, gratings, N_rays
+    sys_mode = 'HARMONI'
+    ao_modes = ['NOAO']
     spaxel_scale = '10x10'
     gratings = ['Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
     N_rays = 1000
 
     for grating in gratings:
-        detector_ensquared_energy(zosapi=psa, mode=mode, spaxel_scale=spaxel_scale, grating=grating, N_rays=N_rays,
-                               files_path=files_path, results_path=results_path)
+        detector_ensquared_energy(zosapi=psa, sys_mode=sys_mode, ao_modes=ao_modes, spaxel_scale=spaxel_scale,
+                                  grating=grating, N_rays=N_rays, files_path=files_path, results_path=results_path)
 
     # Some info on speed and number of rays:
     #   - 100 rays: ~6 sec per wavelength
     #   - 500 rays: ~8 sec per wavelength
     #   - 1000 rays: ~ 10 sec per wavelength
+
+    plt.show()
 
     del psa
     psa = None
