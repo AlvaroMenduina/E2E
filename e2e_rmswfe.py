@@ -154,4 +154,4 @@ if __name__ == """__main__""":
         os.remove(os.path.join(analysis_dir, fig_name))
     fig_box.savefig(os.path.join(analysis_dir, fig_name))
 
-    # plt.show()
+    plt.show()
