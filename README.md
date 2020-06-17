@@ -20,7 +20,14 @@ Analysis implemented so far include:
 * **Ensquared Energy**: geometric value in spatial direction
 * **Spot Diagrams**: see example below at the Detector Plane
 
-As an example, we can calculate the RMS Wavefront Error map at the detector plane for all 4 IFU channels
+As an example, we can calculate the RMS Wavefront Error map at the detector plane for all 4 IFU channels for a given set of spaxel scale, spectral band, system configuration, etc.
+
 ![RMS WFE](images/rms_wfe_map.png?raw=true "RMS Map")
+
+or we can display the results using box and whisker plots to compare the RMS Wavefront Error across multiple spectral bands
+
+![BoxRMS](images/boxplot.png?raw=true "Boxplot")
+
+We can also calculate Spot Diagrams at the detector plane:
 
 ![Spot Diagrams Detector Plane](images/sample_detector_spots.png?raw=true "Detector")
