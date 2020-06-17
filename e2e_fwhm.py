@@ -136,7 +136,7 @@ def fwhm_all_gratings(zosapi, mode, spaxel_scale, grating_list, N_configs, N_wav
 def stich_fwhm_detector(zosapi, spaxel_scale, grating):
 
 
-    analysis = e2e.GeometricFWHM_PSF_Analysis(zosapi=zosapi)
+    analysis = e2e.FWHM_PSF_Analysis(zosapi=zosapi)
 
     ifu_sections = ['AB', 'CD', 'EF', 'GH']
 

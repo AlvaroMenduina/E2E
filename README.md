@@ -22,4 +22,4 @@ Analysis implemented so far include:
 
 More to come, later on
 
-![Spot Diagrams Detector Plane](sample_detector_spots.png?raw=true "Detector")
+![Spot Diagrams Detector Plane](images/sample_detector_spots.png?raw=true "Detector")
