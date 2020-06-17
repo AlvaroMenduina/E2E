@@ -98,9 +98,8 @@ if __name__ == """__main__""":
     results_path = os.path.abspath("D:\End to End Model\Results_June")
 
     mode = 'HARMONI'
-    spaxel_scale = '20x20'
+    spaxel_scale = '10x10'
     gratings = ['Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
-    # gratings = ['H']
     N_rays = 1000
 
     for grating in gratings:

@@ -74,10 +74,10 @@ focal_planes['HARMONI'] = {'4x4': {'AB': {'IS': 96, 'DET': None},
                                      'CD': {'IS': 92, 'DET': None},
                                      'EF': {'IS': 93, 'DET': None},
                                      'GH': {'IS': 92, 'DET': None}},
-                           '60x30': {'AB': {'DET': None},
-                                   'CD': {'DET': None},
-                                   'EF': {'DET': None},
-                                   'GH': {'DET': None}}
+                           '60x30': {'AB': {'IS': 85, 'DET': None},
+                                     'CD': {'IS': 84, 'DET': None},
+                                     'EF': {'IS': 85, 'DET': None},
+                                     'GH': {'IS': 84, 'DET': None}}
                            }
 
 # focal_planes = {}
@@ -260,8 +260,10 @@ def airy_and_slicer(wavelength, scale_mas, PSF_window, N_window):
     # ax1.set_ylim([-15, 15])
     # ax1.set_title(r'Airy Pattern | Slicer Mask %.1f mas' % scale_mas)
     #
-    # img2 = ax2.imshow(aperture_mask * (np.abs(pup_grating)**2), cmap='bwr')
+    # img2 = ax2.imshow(aperture_mask * (np.abs(pup_grating)**2), extent=[-1, 1, -1, 1], cmap='bwr')
     # ax2.set_title(r'Pupil Plane | Aperture Mask')
+    # ax2.set_xlim([-0.25, 0.25])
+    # ax2.set_ylim([-0.25, 0.25])
     #
     # img3 = ax3.imshow(final_psf, extent=[x_min, x_max, x_min, x_max], cmap='bwr')
     # ax3.set_xlabel(r'X [mas]')
@@ -2129,6 +2131,7 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
         checksum_detector = 0
         index_valid_detector = []
         vignetted = []
+        index_vignetted = []
         for i in range(N_rays):
             output = rays_detector.ReadNextResult()
             if output[2] == 0 and output[3] == 0:       # ErrorCode & VignetteCode
@@ -2145,6 +2148,7 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
                 detector_xy[i, 1] = output[5]
                 checksum_detector += 1
                 index_valid_detector.append(i)
+                index_vignetted.append(i)
 
                 # print("\nError Code: %d | Vignette Code: %d" % (error_code, vignette_code))
         vignetted = np.array(vignetted)
@@ -2168,8 +2172,8 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
         sdx = np.mean(valid_det_x)
         sdy = np.mean(valid_det_y)
 
-        left_detector = valid_det_x < sdx + det_pix
-        right_detector = valid_det_x > sdx - det_pix
+        left_detector = valid_det_x < sdx + 0.25 * det_pix
+        right_detector = valid_det_x > sdx - 0.25 * det_pix
         inside_detector = (np.logical_and(left_detector, right_detector))
         total_detector = np.sum(inside_detector)
         EE = total_detector / N_rays
@@ -2194,8 +2198,9 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
         #
         #     print("\nTracing %d rays to calculate Ensquared Energy" % (N_rays))
         #     fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
-        #     # ax1.scatter(px, py, s=5, color='red')
+        #
         #     ax1.scatter(px[valid_both], py[valid_both], s=5, color='lime')
+        #     ax1.scatter(px[index_vignetted], py[index_vignetted], s=5, color='red')
         #     ax1.set_xlabel(r'$P_x$')
         #     ax1.set_ylabel(r'$P_y$')
         #     ax1.set_xlim([-1, 1])
@@ -2205,8 +2210,8 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
         #
         #     sx, sy = slicer_xy[:, 0], slicer_xy[:, 1]
         #     scx, scy = np.mean(sx), np.mean(sy)
-        #     ax2.scatter(sx, sy, s=3, color='red')
         #     ax2.scatter(sx[valid_both], sy[valid_both], s=3, color='blue')
+        #     ax2.scatter(sx[index_vignetted], sy[index_vignetted], s=3, color='red')
         #     # ax2.scatter(scx, scy, s=8, color='red')
         #     ax2.axhline(y=scy + 1.0, color='black', linestyle='--')
         #     ax2.axhline(y=scy - 1.0, color='black', linestyle='--')
@@ -2218,7 +2223,8 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
         #     ax2.set_aspect('equal')
         #
         #     ax3.scatter(valid_det_x, valid_det_y, s=3, color='green')
-        #     ax3.scatter(vignetted[:, 0], vignetted[:, 1], s=3, color='orange')
+        #     ax3.scatter(valid_det_x[index_vignetted], valid_det_y[index_vignetted], s=3, color='red')
+        #     # ax3.scatter(vignetted[:, 0], vignetted[:, 1], s=3, color='orange')
         #     ax3.axvline(x=sdx + det_pix, color='black', linestyle='--')
         #     ax3.axvline(x=sdx - det_pix, color='black', linestyle='--')
         #     ax3.set_xlabel(r'Detector X [mm]')
@@ -2446,20 +2452,20 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
         psf_diffr = diffraction.add_diffraction(psf_geo, PSF_window, spaxel_scale, wavelength)
         # psf_diffr = add_diffraction(psf_geo, spaxel_scale, wavelength)
 
-        fig, (ax1, ax2) = plt.subplots(1, 2)
-        img1 = ax1.imshow(psf_geo, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
-        plt.colorbar(img1, ax=ax1, orientation='horizontal')
-        ax1.set_xlabel(r'X [mm]')
-        ax1.set_ylabel(r'Y [mm]')
-        ax1.set_title(r'Geometric PSF estimate')
-
-        img2 = ax2.imshow(psf_diffr, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
-        plt.colorbar(img2, ax=ax2, orientation='horizontal')
-        ax2.set_xlabel(r'X [mm]')
-        ax2.set_ylabel(r'Y [mm]')
-        ax2.set_title(r'Diffraction PSF')
-
-        plt.show()
+        # fig, (ax1, ax2) = plt.subplots(1, 2)
+        # img1 = ax1.imshow(psf_geo, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
+        # plt.colorbar(img1, ax=ax1, orientation='horizontal')
+        # ax1.set_xlabel(r'X [mm]')
+        # ax1.set_ylabel(r'Y [mm]')
+        # ax1.set_title(r'Geometric PSF estimate')
+        #
+        # img2 = ax2.imshow(psf_diffr, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
+        # plt.colorbar(img2, ax=ax2, orientation='horizontal')
+        # ax2.set_xlabel(r'X [mm]')
+        # ax2.set_ylabel(r'Y [mm]')
+        # ax2.set_title(r'Diffraction PSF')
+        #
+        # plt.show()
 
 
         # cross_psf = pixelate_crosstalk_psf(psf, PSF_window, N_points)
@@ -2473,7 +2479,7 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
         # Fit the PSF to a 2D Gaussian
         fwhm_x, fwhm_y, theta = diffraction.fit_psf_to_gaussian(xx=xx_grid, yy=yy_grid, psf_data=psf_diffr, x0=cent_x, y0=cent_y)
         # sigmaX, sigmaY, theta = fit_gaussian(xx=xx_grid, yy=yy_grid, data=psf_diffr, x0=cent_x, y0=cent_y)
-        print("FWHM_x: %.1f | FWHM_y: %.1f | Theta: %.1f" % (fwhm_x, fwhm_y, np.rad2deg(theta)))
+        # print("FWHM_x: %.1f | FWHM_y: %.1f | Theta: %.1f" % (fwhm_x, fwhm_y, np.rad2deg(theta)))
 
         # fwhm_x = 2 * np.sqrt(2 * np.log(2)) * sigmaX * 1000
         # # fwhm_x_cross = 2 * np.sqrt(2 * np.log(2)) * sigmaX_cross * 1000
@@ -2558,7 +2564,6 @@ class GeometricFWHM_PSF_Analysis(AnalysisGeneric):
         # read the file options
         file_list, sett_list = create_zemax_file_list(which_system=files_opt['which_system'], AO_modes=files_opt['AO_modes'],
                                            scales=files_opt['scales'], IFUs=files_opt['IFUs'], grating=files_opt['grating'])
-        print(file_list)
 
         results = []
         for zemax_file, settings in zip(file_list, sett_list):

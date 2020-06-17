@@ -110,8 +110,8 @@ def fwhm_all_gratings(zosapi, mode, spaxel_scale, grating_list, N_configs, N_wav
     data_x = pd.DataFrame(fx_grating, columns=grating_list)
     data_y = pd.DataFrame(fy_grating, columns=grating_list)
 
-    max_val = np.round(max(np.max(fx_grating), np.max(fy_grating))) + 1
-    min_val = np.floor(min(np.min(fx_grating), np.min(fy_grating))) - 1
+    max_val = np.round(max(np.max(fx_grating), np.max(fy_grating))) + 2
+    min_val = np.floor(min(np.min(fx_grating), np.min(fy_grating))) - 2
 
     fig_box, (ax1, ax2) = plt.subplots(2, 1, figsize=(16, 8))
     sns.boxplot(data=data_x, ax=ax1, hue_order=grating_list, palette=sns.color_palette("Blues"))
@@ -120,8 +120,13 @@ def fwhm_all_gratings(zosapi, mode, spaxel_scale, grating_list, N_configs, N_wav
     ax2.set_ylim([min_val, max_val])
     ax1.set_title('FWHM Along Slice [X]')
     ax2.set_title('FWHM Across Slice [Y]')
-    ax1.set_title('FWHM [$\mu$m]')
-    ax2.set_title('FWHM [$\mu$m]')
+    ax1.set_ylabel('FWHM [$\mu$m]')
+    ax2.set_ylabel('FWHM [$\mu$m]')
+
+    fig_name = "FWHM_PSF_%s_MODE_%s" % (spaxel_scale, mode)
+    if os.path.isfile(os.path.join(results_path, fig_name)):
+        os.remove(os.path.join(results_path, fig_name))
+    fig_box.savefig(os.path.join(results_path, fig_name))
 
     stats = [minX, meanX, maxX, minY, meanY, maxY]
 
@@ -256,8 +261,8 @@ if __name__ == """__main__""":
         os.mkdir(analysis_dir)
 
     mode = 'HARMONI'
-    # gratings = ['IZ', 'J', 'IZJ', 'Z_HIGH', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
-    gratings = ['HK']
+    gratings = ['IZ', 'J', 'IZJ', 'Z_HIGH', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
+    # gratings = ['HK']
 
     spaxel_scale = '4x4'
 
