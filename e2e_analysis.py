@@ -2,8 +2,12 @@
 
 Performance Analysis for the End-to-End Models
 
-author: Alvaro Menduina
-date: March 2020
+This is the main modules that contains all the stuff needed to
+construct a performance analysis
+
+Author: Alvaro Menduina
+Date Created: March 2020
+Latest version: June 2020
 
 """
 
@@ -11,10 +15,8 @@ import os
 import numpy as np
 from numpy.fft import ifft2, fft2, fftshift
 import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle
 import matplotlib.cm as cm
 import matplotlib.tri as tri
-import matplotlib.mlab as mlab
 import seaborn as sns
 from time import time
 import h5py
@@ -33,13 +35,12 @@ import git
 repo = git.Repo(search_parent_directories=True)
 sha = repo.head.object.hexsha
 
-# Parameters
-
-det_pix = 15e-3     # Detector pixel 15 microns
-
 # We need to know the Zemax surface number for all Focal Planes
 # for each mode (ELT, HARMONI, IFS) and for each spaxel scale (4x4, 10x10, 20x20, 60x30)
-# for the FPRS, PO, IFU, SPEC focal planes
+# for the different focal planes
+
+# Keywords for Focal Plane are:
+# PO: PreOptics, IS: Image Slicer, SL: Slit, DET: Detector
 
 # These are the old April-May values
 focal_planes = {}
@@ -61,7 +62,6 @@ focal_planes['IFS'] = {'4x4': {'AB': {'FPRS': 6, 'PO': 41, 'IS': 70, 'SL': 88, '
                                  'GH': {'FPRS': 6, 'PO': 30, 'IS': 58, 'SL': 77, 'DET': None}}}
 
 # Update for June values
-
 focal_planes['HARMONI'] = {'4x4': {'AB': {'IS': 96, 'DET': None},
                                    'CD': {'IS': 95, 'DET': None},
                                    'EF': {'IS': 96, 'DET': None},
@@ -79,29 +79,6 @@ focal_planes['HARMONI'] = {'4x4': {'AB': {'IS': 96, 'DET': None},
                                      'EF': {'IS': 85, 'DET': None},
                                      'GH': {'IS': 84, 'DET': None}}
                            }
-
-# Define the Spaxel Sizes [um] for each Spaxel Scale at each Focal Plane
-spaxel_sizes = {}
-spaxel_sizes["60x30"] = {"FPRS": [97.656, 195.313],
-                              "PO": [195.313, 390.625],
-                              "IFU": [65, 130],
-                              "SPEC": [15, 30]}
-spaxel_sizes["20x20"] = {"FPRS": [65.104, 65.104],
-                              "PO": [195.313, 390.625],
-                              "IFU": [65, 130],
-                              "SPEC": [15, 30]}
-spaxel_sizes["10x10"] = {"FPRS": [35.552, 35.552],
-                              "PO": [195.313, 390.625],
-                              "IFU": [65, 130],
-                              "SPEC": [15, 30]}
-spaxel_sizes["4x4"] = {"FPRS": [13.021, 13.021],
-                            "PO": [195.313, 390.625],
-                            "IFU": [65, 130],
-                            "SPEC": [15, 30]}
-
-
-# Keywords for Focal Plane are:
-# PO: PreOptics, IS: Image Slicer, SL: Slit, DET: Detector
 
 # Taken from Zemax example code
 class PythonStandaloneApplication(object):
@@ -392,45 +369,6 @@ class DiffractionEffects(object):
 
 diffraction = DiffractionEffects()
 
-#
-# def twoD_Gaussian(data_tuple, x0, y0, sigma_x, sigma_y, theta, amplitude, offset):
-#     # Asymmetric 2d Gaussian
-#     (x, y) = data_tuple
-#     x0 = float(x0)
-#     y0 = float(y0)
-#     a = (np.cos(theta)**2)/(2*sigma_x**2) + (np.sin(theta)**2)/(2*sigma_y**2)
-#     b = -(np.sin(2*theta))/(4*sigma_x**2) + (np.sin(2*theta))/(4*sigma_y**2)
-#     c = (np.sin(theta)**2)/(2*sigma_x**2) + (np.cos(theta)**2)/(2*sigma_y**2)
-#     g = offset + amplitude * np.exp(-(a*((x-x0)**2) + 2*b*(x-x0)*(y-y0) + c*((y-y0)**2)))
-#     return g
-#
-# def fit_gaussian(xx, yy, data, x0, y0, sigmax0=0.025, sigmay0=0.025):
-#
-#     # peak, offset = 1.0, 0.0
-#     # sigmax0, sigmay0 = 0.015, 0.015     # 10 microns
-#     rotation0 = 0.0
-#     init = [x0, y0, sigmax0, sigmay0, rotation0, 1.0, 0.0]  # first guess of 1.0 for sigma
-#     bounds = ([-np.inf, -np.inf, 0.0, 0.0, -np.pi/4, -np.inf, -np.inf],
-#               [np.inf, np.inf, np.inf, np.inf, np.pi/4, np.inf, np.inf])
-#
-#     try:
-#         pars, cov = curve_fit(twoD_Gaussian, (xx.ravel(), yy.ravel()), data.ravel(), p0=init, bounds=bounds)
-#         sigmaX, sigmaY, theta = pars[2], pars[3], pars[4]
-#
-#     except RuntimeError:
-#         fig, ax = plt.subplots(1, 1)
-#         img = ax.imshow(data, cmap='bwr', origin='lower')
-#         # ax.scatter(x0, y0, s=3, color='black', alpha=0.5)
-#         plt.colorbar(img, ax=ax)
-#         plt.title('PSF to fit')
-#         plt.show()
-#         # sigmaX, sigmaY, theta = np.nan, np.nan, np.nan
-#         new_sigmax = np.random.uniform(low=0.010, high=0.030)
-#         new_sigmay = np.random.uniform(low=0.010, high=0.030)
-#         print("Fit error try again with new sigmas")
-#         fit_gaussian(xx, yy, data, x0, y0, sigmax0=new_sigmax, sigmay0=new_sigmay)
-#
-#     return sigmaX, sigmaY, theta
 
 
 def pixelate_crosstalk_psf(raw_psf, PSF_window, N_points, xt=0.02):
@@ -452,105 +390,6 @@ def pixelate_crosstalk_psf(raw_psf, PSF_window, N_points, xt=0.02):
 
     return cross_psf
 
-
-# Old code, get rid of it once new version is validated
-MAX_WAVES = 23
-@functools.lru_cache(maxsize=MAX_WAVES)
-def airy(wavelength, scale_mas, N_window):
-
-    print('Recalculating Airy Pattern for %.3f microns' % wavelength)
-
-    plate_scale = 3.3162       # mm / arcs
-    pix_sampling = 1.0        # micron at the detector plane
-    spaxel_scale = pix_sampling / plate_scale       # milliarcsec / pixel
-
-    ELT_DIAM = 39
-    MILIARCSECS_IN_A_RAD = 206265000
-    scale_rad = spaxel_scale / MILIARCSECS_IN_A_RAD
-    RHO_APER = scale_rad * ELT_DIAM / (wavelength * 1e-6)
-    RHO_OBSC = 0.30 * RHO_APER  # ELT central obscuration
-
-    SPAXEL_RAD = RHO_APER * wavelength / ELT_DIAM * 1e-6
-    SPAXEL_MAS = SPAXEL_RAD * MILIARCSECS_IN_A_RAD
-    # print(SPAXEL_MAS)
-
-    N = 1024
-    x = np.linspace(-1, 1, N)
-    xx, yy = np.meshgrid(x, x)
-    rho = np.sqrt(xx**2 + yy**2)
-    # print(RHO_APER)
-
-    elt_mask = (RHO_OBSC < rho) & (rho < RHO_APER)
-    pupil = elt_mask * np.exp(1j * elt_mask)
-    image_electric = fftshift(fft2(pupil))
-    psf = (np.abs(image_electric))**2
-    psf /= np.max(psf)
-
-    # Add slicer effect
-    x_min, x_max = -N/2 * SPAXEL_MAS, N/2 * SPAXEL_MAS
-    x_slice = np.linspace(x_min, x_max, N, endpoint=True)
-    x_grid, y_grid = np.meshgrid(x_slice, x_slice)
-    slicer_mask = np.abs(y_grid) < scale_mas / 2
-    #
-    # plt.figure()
-    # plt.imshow(slicer_mask * psf, extent=[x_min, x_max, x_min, x_max], cmap='bwr')
-    # plt.axhline(y=scale_mas/2, linestyle='--', color='black')
-    # plt.axhline(y=-scale_mas/2, linestyle='--', color='black')
-    # plt.xlabel(r'X [mas]')
-    # plt.ylabel(r'Y [mas]')
-    # plt.xlim([-15, 15])
-    # plt.ylim([-15, 15])
-    # plt.title(r'Airy Pattern | Slicer Mask %.1f mas' % scale_mas)
-
-    # Propagate to pupil plane
-    pup_grating = ifft2(fftshift(slicer_mask * image_electric))
-    # this time without the central obscuration
-    aperture_mask = rho < RHO_APER
-
-    # plt.figure()
-    # plt.imshow((np.abs(pup_grating)**2), cmap='bwr')
-    # plt.colorbar()
-    #
-    # plt.figure()
-    # plt.imshow(aperture_mask * (np.abs(pup_grating)**2), cmap='bwr')
-    # # plt.colorbar()
-    # plt.title(r'Pupil Plane | Aperture Mask')
-
-    # Back to focal plane
-    final_focal = fftshift(fft2(aperture_mask * pup_grating))
-
-    # plt.figure()
-    # plt.imshow((np.abs(final_focal)**2), extent=[x_min, x_max, x_min, x_max], cmap='bwr')
-    # # plt.colorbar()
-    # plt.xlabel(r'X [mas]')
-    # plt.ylabel(r'Y [mas]')
-    # plt.xlim([-15, 15])
-    # plt.ylim([-15, 15])
-    # plt.title(r'Focal Plane | Aperture Mask')
-    #
-    # plt.show()
-
-    final_psf = np.abs(final_focal)**2
-    final_psf /= np.max(final_psf)
-
-    min_pix, max_pix = N//2 - N_window//2, N//2 + N_window//2
-    crop_psf = final_psf[min_pix:max_pix, min_pix:max_pix]
-
-    return crop_psf
-    # return
-
-
-def add_diffraction(psf_geo, scale_mas, wavelength):
-
-    airy_pattern = airy(wavelength, scale_mas, N_window=psf_geo.shape[0])
-    # plt.figure()
-    # plt.imshow(airy_pattern, cmap='bwr')
-    # plt.colorbar()
-    # plt.show()
-    diffr = convolve2d(psf_geo, airy_pattern, mode='same')
-    diffr /= np.max(diffr)
-
-    return diffr
 
 
 
@@ -958,9 +797,6 @@ class AnalysisGeneric(object):
                 # Store the result values in the arrays:
                 for _name, res in zip(results_names, results):
                     globals()[_name][k, j] = res
-                # data_results[:, j, k] = data            # The results of the analysis
-                # object_xy[:, :, j, k] = objxy           # The field positions for the OBJECT
-                # focal_xy[:, :, j, k] = focxy            # The raytrace results at the chosen Focal Plane
 
         # Unignore the surfaces
         if surface != (N_surfaces - 1):
@@ -1844,6 +1680,8 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
         :return:
         """
 
+        det_pix = 15e-3  # Detector pixel 15 microns
+
         # Set Current Configuration
         system.MCE.SetCurrentConfiguration(config)
 
@@ -2284,23 +2122,32 @@ class FWHM_PSF_Analysis(AnalysisGeneric):
 
 
     def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
-                        configuration_idx=None, surface=None, N_rays=40, N_points=150, PSF_window=150, plots=False):
+                        configuration_idx=None, surface=None, N_rays=500, N_points=150, PSF_window=150):
+        """
+        Loop over the Zemax files and calculate the FWHM
+
+        Relevant parameters:
+            - N_rays: How many pupil rays rays to trace to estimate the Geometric PSF
+            - N_points: how many points 'pixels' to crop the PSF to before fitting to Gaussian
+            - PSF_window: how many microns does that crop window span. important to ensure a sampling of 1 micron / point
+
+        :param files_dir:
+        :param files_opt:
+        :param results_path:
+        :param wavelength_idx:
+        :param configuration_idx:
+        :param surface:
+        :param N_rays:
+        :param N_points:
+        :param PSF_window:
+        :return:
         """
 
-        """
 
         # We want the result to produce as output: the RMS WFE array, and the RayTrace at both Object and Focal plane
         results_names = ['GEO_FWHM', 'PSF_CUBE', 'OBJ_XY', 'FOC_XY']
         # we need to give the shapes of each array to self.run_analysis
         results_shapes = [(3,), (PSF_window//15, PSF_window//15), (2,), (2,)]
-
-        # # We need to know how many rays are inside the pupil
-        # px = np.linspace(-1, 1, N_rays, endpoint=True)
-        # pxx, pyy = np.meshgrid(px, px)
-        # pupil_mask = np.sqrt(pxx ** 2 + pyy ** 2) <= 1.0
-        # px, py = pxx[pupil_mask], pyy[pupil_mask]
-        # # How many rays are actually inside the pupil aperture?
-        # N_rays_inside = px.shape[0]
 
         px, py = define_pupil_sampling(r_obsc=0.2841, N_rays=N_rays, mode='random')
         print("Using %d rays" % N_rays)
@@ -2320,7 +2167,7 @@ class FWHM_PSF_Analysis(AnalysisGeneric):
         for zemax_file, settings in zip(file_list, sett_list):
 
             # Clear the Cache for the Airy Pattern function
-            airy.cache_clear()
+            airy_and_slicer.cache_clear()
 
             mas_dict = {'4x4': 4.0, '10x10': 10.0, '20x20': 20.0, '60x30': 60.0}
             spaxel_scale = mas_dict[settings['scale']]
@@ -2339,87 +2186,8 @@ class FWHM_PSF_Analysis(AnalysisGeneric):
             settings['surface'] = 'IMG' if surface is None else surface
 
             file_name = zemax_file.split('.')[0]
-            self.save_hdf5(analysis_name='FWHM_PSF', analysis_metadata=metadata, list_results=list_results,
-                           results_names=results_names, file_name=file_name, file_settings=settings, results_dir=results_path)
-
-            # N_waves = geo_fwhm.shape[0]
-            #
-            # if wavelength_idx is None:
-            #     wave_idx = np.arange(1, N_waves + 1)
-            # else:
-            #     wave_idx = wavelength_idx
-            #
-            #
-            # # Post-Processing the results
-            # file_name = zemax_file.split('.')[0]
-            # results_dir = os.path.join(results_path, file_name)
-            # surface_number = str(surface) if surface is not None else '_IMG'
-            # settings['surface'] = surface
-            #
-            # surface_codes = focal_planes[settings['system']][settings['scale']]
-            # surface_name = list(surface_codes.keys())[list(surface_codes.values()).index(surface)]
-
-            # # First thing is to create a separate folder within the results directory for this analysis
-            # analysis_dir = os.path.join(results_dir, 'FWHM')
-            # print("Analysis Results will be saved in folder: ", analysis_dir)
-            # if not os.path.exists(analysis_dir):
-            #     os.mkdir(analysis_dir)
-            #
-            # if surface == None:
-            #
-            #     x, y = foc_xy[:, :, :, 0].flatten(), foc_xy[:, :, :, 1].flatten()
-            #     triang = tri.Triangulation(x, y)
-            #     maxz = np.max(geo_fwhm)
-            #
-            #     fig1, axes = plt.subplots(1, 3)
-            #     # ax1.set_aspect('equal')
-            #     titles = [r'FWHM [$\mu$m]', r'FWHM_X [$\mu$m]', r'FWHM_Y [$\mu$m]']
-            #     for k in range(3):
-            #         ax = axes[k]
-            #         tpc = ax.tripcolor(triang, geo_fwhm[:, :, :, k].flatten(), shading='flat', cmap='jet')
-            #         tpc.set_clim(vmin=0, vmax=maxz)
-            #         ax.scatter(x, y, color='black', s=2)
-            #         plt.colorbar(tpc, orientation='horizontal', ax=ax)
-            #         ax.set_xlabel(r'X [mm]')
-            #         if k == 0:
-            #             ax.set_ylabel(r'Y [mm]')
-            #         ax.set_title(titles[k])
-            #
-            #     fig_name = file_name + '_FWHM_SURF_' + surface_name + '_DET'
-            #     # plt.title(fig_name)
-            #     if os.path.isfile(os.path.join(analysis_dir, fig_name)):
-            #         os.remove(os.path.join(analysis_dir, fig_name))
-            #     plt.savefig(os.path.join(analysis_dir, fig_name))
-            #
-            # else:
-            #     # fwhm is shape [N_waves, N_configs, N_fields, (meanR, XR, YR)]
-            #     for j_wave in range(N_waves):
-            #         x, y = foc_xy[j_wave, :, :, 0].flatten(), foc_xy[j_wave, :, :, 1].flatten()
-            #         triang = tri.Triangulation(x, y)
-            #         maxz = np.max(geo_fwhm[j_wave])
-            #
-            #         fig1, axes = plt.subplots(1, 3)
-            #         # ax1.set_aspect('equal')
-            #         titles = [r'FWHM [$\mu$m]', r'FWHM_X [$\mu$m]', r'FWHM_Y [$\mu$m]']
-            #         for k in range(3):
-            #             ax = axes[k]
-            #             tpc = ax.tripcolor(triang, geo_fwhm[j_wave, :, :, k].flatten(), shading='flat', cmap='jet')
-            #             tpc.set_clim(vmin=0, vmax=maxz)
-            #             ax.scatter(x, y, color='black', s=2)
-            #             plt.colorbar(tpc, orientation='horizontal', ax=ax)
-            #             ax.set_xlabel(r'X [mm]')
-            #             if k == 0:
-            #                 ax.set_ylabel(r'Y [mm]')
-            #             ax.set_title(titles[k])
-            #
-            #         fig_name = file_name + '_FWHM_SURF_' + surface_name + '_FOCAL_WAVE%d' % wave_idx[j_wave]
-            #         # plt.title(fig_name)
-            #         if os.path.isfile(os.path.join(analysis_dir, fig_name)):
-            #             os.remove(os.path.join(analysis_dir, fig_name))
-            #         plt.savefig(os.path.join(analysis_dir, fig_name))
-            #     #     plt.show(block=False)
-            #     #     plt.pause(0.5)
-            #     #     plt.close()
+            # self.save_hdf5(analysis_name='FWHM_PSF', analysis_metadata=metadata, list_results=list_results,
+            #                results_names=results_names, file_name=file_name, file_settings=settings, results_dir=results_path)
 
         return results
 
@@ -2665,8 +2433,7 @@ class RMS_WFE_Analysis(AnalysisGeneric):
     # and "plot_RMS_WFE_maps" to save the figures
 
     def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
-                        configuration_idx=None, surface=None, spaxels_per_slice=51,
-                        plots=True):
+                        configuration_idx=None, surface=None, spaxels_per_slice=51):
         """
         Function that loops over a given set of E2E model Zemax files, running the analysis
         defined by self.analysis_function_rms_wfe
@@ -2719,172 +2486,31 @@ class RMS_WFE_Analysis(AnalysisGeneric):
             # self.save_hdf5(analysis_name='RMS_WFE', analysis_metadata=metadata, list_results=list_results, results_names=results_names,
             #                file_name=file_name, file_settings=settings, results_dir=results_path)
 
-            if plots is True:
-                self.plot_and_save(analysis_name='RMS_WFE', list_results=list_results, file_name=file_name,
-                                   file_settings=settings, results_dir=results_dir, wavelength_idx=wavelength_idx)
-
-
-
-
 
         return results
 
-
-
-
-    def plot_RMS_WFE_maps(self, file_name, result_path, rms_ifu, wavelengths, colormap='jet'):
-
-        N_waves = rms_ifu.shape[0]
-        results_dir = os.path.join(result_path, file_name)
-
-        for i in range(N_waves):
-            wavelength = wavelengths[i]
-            data = rms_ifu[i]
-            minRMS = np.nanmin(data)
-            maxRMS = np.nanmax(data)
-            meanRMS = np.nanmean(data)
-
-            plt.figure()
-            plt.imshow(data, cmap=colormap, origin='lower')
-            plt.title(r'$\lambda$: %.3f $\mu$m | RMS WFE [nm] | min:%.0f, max:%.0f, mean:%.0f nm' % (
-            wavelength, minRMS, maxRMS, meanRMS))
-            plt.clim(0, maxRMS)
-            plt.colorbar(orientation='horizontal')
-            plt.xlabel('Spaxels')
-            plt.ylabel('Slices')
-            fig_name = file_name + '_' + str(i + 1) + '_RMSWFE'
-            if os.path.isfile(os.path.join(results_dir, fig_name)):
-                os.remove(os.path.join(results_dir, fig_name))
-            plt.savefig(os.path.join(results_dir, fig_name))
-            plt.show(block=False)
-            plt.pause(0.5)
-            plt.close()
-
-        # We would create way to many figures so we want to close them as we go
-
-        return
-
+# Define the Spaxel Sizes [um] for each Spaxel Scale at each Focal Plane
+spaxel_sizes = {}
+spaxel_sizes["60x30"] = {"FPRS": [97.656, 195.313],
+                              "PO": [195.313, 390.625],
+                              "IFU": [65, 130],
+                              "SPEC": [15, 30]}
+spaxel_sizes["20x20"] = {"FPRS": [65.104, 65.104],
+                              "PO": [195.313, 390.625],
+                              "IFU": [65, 130],
+                              "SPEC": [15, 30]}
+spaxel_sizes["10x10"] = {"FPRS": [35.552, 35.552],
+                              "PO": [195.313, 390.625],
+                              "IFU": [65, 130],
+                              "SPEC": [15, 30]}
+spaxel_sizes["4x4"] = {"FPRS": [13.021, 13.021],
+                            "PO": [195.313, 390.625],
+                            "IFU": [65, 130],
+                            "SPEC": [15, 30]}
 
 if __name__ == """__main__""":
 
-    plt.rc('font', family='serif')
-    plt.rc('text', usetex=False)
-
-    # Create a Python Standalone Application
-    psa = PythonStandaloneApplication()
-
-    files_path = os.path.abspath("D:\End to End Model\April_2020")
-    results_path = os.path.abspath("D:\End to End Model\Results_April")
-
-    analysis = GeometricFWHM_PSF_Analysis(zosapi=psa)
-    spaxel_scale = '60x30'
-    focal_plane = focal_planes['IFS'][spaxel_scale]['PO']
-    options = {'which_system': 'IFS', 'AO_modes': [], 'scales': ['60x30'], 'IFUs': ['EF'],
-               'grating': ['VIS']}
-    list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options, results_path=results_path,
-                                            wavelength_idx=[1], configuration_idx=None, surface=focal_plane,
-                                            N_rays=35)
-
-    fwhm, obj_xy, foc_xy, wavelengths = list_results
-
-    plt.show()
-
-    """ Old FWHM bits with Seaborn Kernel Density Estimation """
-
-    # # For the FWHM we use Seaborn to calculate a Kernel Density Estimate
-    # # Given the Raytrace positions (x, y) for a cloud of Rays, it calculates
-    # # the density contours.
-    # N_levels = 20
-    #
-    # # ax = axes[j]                # select the subplot axis to place the results
-    # # sns.set_style("white")
-    # # # contour = sns.kdeplot(x, y, n_levels=N_levels, ax=ax)       # Kernel Density Estimate with Seaborn
-    # # contour = sns.kdeplot(x, y, n_levels=N_levels, ax=ax)       # Kernel Density Estimate with Seaborn
-    # # half_contour = contour.collections[N_levels//2]             # Select the 50% level contour
-    # # path = half_contour.get_paths()[0]                          # Select the path for that contour
-    # # vertices = path.vertices                                    # Select vertices of that contour
-    # # N_segments = vertices.shape[0]
-    # #
-    # # ax.scatter(x, y, color='blue', s=1)                         # Plot the cloud of Rays
-    # # # ax.scatter(ref_x, ref_y, label=reference, color='green')  # Plot the reference point
-    # # ax.scatter(vertices[:, 0], vertices[:, 1], color='red', s=5)
-    # # if N_segments < 20:     # Warn me that the contour has too few vertices
-    # #     print("Warning: Too few points (%d) along the 50 percent contour" % N_segments)
-    # #     print("Results may be innacurate")
-    # #
-    # #     # new contour
-    # #     next_contour = contour.collections[N_levels // 2 - 1]
-    # #     next_path = next_contour.get_paths()[0]
-    # #     next_vertices = next_path.vertices
-    # #     N_next = next_vertices.shape[0]
-    # #     print("Next Contour: %d" % N_next)
-    #
-    # # Old approach that sometimes fails because it uses very few point in the contour
-    # # half_segments = half_contour.get_segments()[0]
-    # # half_positions = half_contour.get_positions()
-    #
-    # # # Once we have the points that define the 50% contour we can use that to
-    # # # calculate the FWHM
-    # # radii = np.sqrt((vertices[:, 0] - ref_x) ** 2 + (vertices[:, 1] - ref_y) ** 2)
-    # # mean_fwhm = 2 * 1e3 * np.mean(radii)            # Twice the mean distance between contour and ref. point
-    # #
-    # # # Marginal distributions - Across and Along the slice
-    #
-    # sns.set_style("white")
-    # joint = sns.jointplot(x=x, y=y, kind='kde')
-    #
-    #
-    # def calculate_marginal_fwhm(ax_marg, mode='X'):
-    #     # We need the axis of the plot where
-    #     # the marginal distribution lives
-    #
-    #     path_marg = ax_marg.collections[0].get_paths()[0]
-    #     vert_marg = path_marg.vertices
-    #     N_vert = vert_marg.shape[0]
-    #     # the plot is a closed shape so half of it is just a path along y=0
-    #     if mode == 'X':
-    #         xdata = vert_marg[N_vert // 2:, 0]
-    #         ydata = vert_marg[N_vert // 2:, 1]
-    #     if mode == 'Y':  # In Y mode the data is rotated 90deg so X data becomes Y
-    #         xdata = vert_marg[N_vert // 2:, 1]
-    #         ydata = vert_marg[N_vert // 2:, 0]
-    #
-    #     peak = np.max(ydata)
-    #     # as the sampling is constant we will count how many points are
-    #     # above 50% of the peak, and how many below
-    #     # and scale that ratio above/below by the range of the plot
-    #     deltaX = np.max(xdata) - np.min(xdata)  # the range of our data
-    #     above = np.argwhere(ydata >= 0.5 * peak).shape[0]
-    #     below = np.argwhere(ydata < 0.5 * peak).shape[0]
-    #     total = above + below
-    #     # Above / Total = FWHM / Range
-    #     fwhm = above / total * deltaX
-    #
-    #     return fwhm
-    #
-    #
-    # fwhm_x = 1e3 * calculate_marginal_fwhm(joint.ax_marg_x, mode='X')
-    # fwhm_y = 1e3 * calculate_marginal_fwhm(joint.ax_marg_y, mode='Y')
-    #
-    # # print("%.1f, %.1f, %.1f" % (mean_fwhm, fwhm_x, fwhm_y))
-    #
-    # # # And the projected sizes both ALONG (X) and ACROSS (Y) the slice
-    # # rx = np.max(vertices[:, 0]) - np.min(vertices[:, 0])        # Max(x) - Min(x)
-    # # ry = np.max(vertices[:, 1]) - np.min(vertices[:, 1])        # Max(y) - Min(y)
-    # # fwhm_x, fwhm_y = 1e3 * np.mean(rx), 1e3 * np.mean(ry)
-    #
-    # # rx = np.sqrt((vertices[:, 0] - ref_x) ** 2)
-    # # ry = np.sqrt((vertices[:, 1] - ref_y) ** 2)
-    #
-    # FWHM[j, :] = [-99, fwhm_x, fwhm_y]  # Store the results
-    # # ax.set_title(r"Field %d | FWHM=%.1f, Fx$=%.1f, Fy=%.1f \mu$m" % (j+1, mean_fwhm, fwhm_x, fwhm_y))
-    # # ax.set_aspect('equal')
-    # # plt.legend()
-    #
-    # plt.close(joint.fig)
-
-    del psa
-    psa = None
+    pass
 
 
 

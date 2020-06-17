@@ -64,7 +64,7 @@ def rms_wfe_histograms(zosapi, mode, spaxel_scale, spaxels_per_slice, wavelength
         focal_plane = e2e.focal_planes[mode][spaxel_scale][ifu_section][plane]
         list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options, results_path=results_path,
                                                 wavelength_idx=wavelength_idx, configuration_idx=None,
-                                                surface=focal_plane, spaxels_per_slice=spaxels_per_slice, plots=False)
+                                                surface=focal_plane, spaxels_per_slice=spaxels_per_slice)
         # Only 1 list, no Monte Carlo
         rms_wfe, obj_xy, foc_xy, global_xy, waves = list_results[0]
         rms.append(rms_wfe)
@@ -135,7 +135,7 @@ def stitch_fields(zosapi, mode, spaxel_scale, spaxels_per_slice, wavelength_idx,
         focal_plane = e2e.focal_planes[mode][spaxel_scale][ifu_section][plane]
         list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options, results_path=results_path,
                                                 wavelength_idx=wavelength_idx, configuration_idx=None,
-                                                surface=focal_plane, spaxels_per_slice=spaxels_per_slice, plots=False)
+                                                surface=focal_plane, spaxels_per_slice=spaxels_per_slice)
         # Only 1 list, no Monte Carlo
         rms_wfe, obj_xy, foc_xy, global_xy, waves = list_results[0]
 
@@ -351,7 +351,7 @@ def image_slicer_analysis(zosapi, spaxel_scale, spaxels_per_slice, wavelength_id
         list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options,
                                                                   results_path=results_path, wavelength_idx=wavelength_idx,
                                                                   configuration_idx=None, surface=focal_plane,
-                                                                  spaxels_per_slice=spaxels_per_slice, plots=False)
+                                                                  spaxels_per_slice=spaxels_per_slice)
 
         rms_wfe, obj_xy, foc_xy, global_xy, waves = list_results[0]
 
@@ -425,7 +425,7 @@ def slit_analysis(zosapi, spaxel_scale, spaxels_per_slice, wavelength_idx, grati
         list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options,
                                                           results_path=results_path, wavelength_idx=wavelength_idx,
                                                           configuration_idx=None, surface=slit_plane,
-                                                          spaxels_per_slice=spaxels_per_slice, plots=False)
+                                                          spaxels_per_slice=spaxels_per_slice)
 
         rms_slit, obj_xy, foc_xy, global_xy, waves = list_results[0]
 
@@ -490,7 +490,7 @@ if __name__ == """__main__""":
     # focal_plane = e2e.focal_planes['IFS']['60x30']['AB']['PO']
     # list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options, results_path=results_path,
     #                                         wavelength_idx=None, configuration_idx=None,
-    #                                         surface=focal_plane, spaxels_per_slice=15, plots=False)
+    #                                         surface=focal_plane, spaxels_per_slice=15)
     #
     # import h5py
     # path_hdf5 = os.path.join(results_path, 'HDF5')
@@ -593,7 +593,7 @@ if __name__ == """__main__""":
         list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options,
                                                                   results_path=results_path, wavelength_idx=wavelength_idx,
                                                                   configuration_idx=None, surface=focal_plane,
-                                                                  spaxels_per_slice=spaxels_per_slice, plots=False)
+                                                                  spaxels_per_slice=spaxels_per_slice)
 
         rms, obj_xy, foc_xy, global_xy, waves = list_results[0]
 

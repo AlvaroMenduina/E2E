@@ -53,7 +53,7 @@ def detector_rms_wfe(zosapi, sys_mode, ao_modes, spaxel_scale, spaxels_per_slice
 
         list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options, results_path=results_path,
                                                 wavelength_idx=None, configuration_idx=None,
-                                                surface=None, spaxels_per_slice=spaxels_per_slice, plots=False)
+                                                surface=None, spaxels_per_slice=spaxels_per_slice)
         # Only 1 list, no Monte Carlo
         rms_wfe, obj_xy, foc_xy, global_xy, waves = list_results[0]
 
