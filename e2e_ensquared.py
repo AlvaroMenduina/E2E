@@ -46,6 +46,8 @@ def detector_ensquared_energy(zosapi, sys_mode, ao_modes, spaxel_scale, grating,
 
     analysis = e2e.EnsquaredEnergyAnalysis(zosapi=zosapi)
 
+    waves = np.linspace(1, 23, 5).astype(int)
+
     ifu_sections = ['AB', 'CD', 'EF', 'GH']
     fig, axes = plt.subplots(2, 2, figsize=(15, 10))
 
@@ -54,7 +56,7 @@ def detector_ensquared_energy(zosapi, sys_mode, ao_modes, spaxel_scale, grating,
         options = {'which_system': sys_mode, 'AO_modes': ao_modes, 'scales': [spaxel_scale], 'IFUs': [ifu],
                    'grating': [grating]}
         list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options, results_path=results_path,
-                                                wavelength_idx=None, configuration_idx=None, N_rays=N_rays)
+                                                wavelength_idx=waves, configuration_idx=None, N_rays=N_rays)
 
         # No Monte Carlo so the list_results only contains 1 entry, for the IFU channel
         energy, obj_xy, slicer_xy, detector_xy, wavelengths = list_results[0]
@@ -99,6 +101,74 @@ def detector_ensquared_energy(zosapi, sys_mode, ao_modes, spaxel_scale, grating,
     return
 
 
+def ensquared_spaxel_size(zosapi, sys_mode, ao_modes, spaxel_scale, grating, N_rays, files_path, results_path):
+    """
+    Calculate the Ensquared Energy as a function of the pixel box
+    :param zosapi:
+    :param sys_mode:
+    :param ao_modes:
+    :param spaxel_scale:
+    :param grating:
+    :param N_rays:
+    :param files_path:
+    :param results_path:
+    :return:
+    """
+
+    analysis_dir = os.path.join(results_path, 'ENSQUARED ENERGY')
+    print("Analysis Results will be saved in folder: ", analysis_dir)
+    if not os.path.exists(analysis_dir):
+        os.mkdir(analysis_dir)
+
+    analysis = e2e.EnsquaredEnergyAnalysis(zosapi=zosapi)
+    waves = np.linspace(1, 23, 5).astype(int)
+
+    ifu_sections = ['AB', 'CD', 'EF', 'GH']
+
+    sizes = np.linspace(0.0, 2.0, 50, endpoint=True)
+    EE_min, EE_max = [], []
+    EE_mean = []
+    for alpha in sizes:
+        print("\nBox size: %.3f detector pixels" % alpha)
+
+        energy_all_ifus = []
+        for i, ifu in enumerate(ifu_sections):
+
+            options = {'which_system': sys_mode, 'AO_modes': ao_modes, 'scales': [spaxel_scale], 'IFUs': [ifu],
+                       'grating': [grating]}
+            list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options, results_path=results_path,
+                                                    wavelength_idx=waves, configuration_idx=[37, 38], N_rays=N_rays,
+                                                    alpha=alpha)
+
+            # No Monte Carlo so the list_results only contains 1 entry, for the IFU channel
+            energy, obj_xy, slicer_xy, detector_xy, wavelengths = list_results[0]
+            energy_all_ifus.append(energy.flatten())
+        energy_all_ifus = np.array(energy_all_ifus)
+        EE_min.append(np.min(energy_all_ifus))
+        EE_max.append(np.max(energy_all_ifus))
+        EE_mean.append(np.mean(energy_all_ifus))
+
+    fig, ax = plt.subplots(1, 1)
+    ax.plot(sizes, EE_min, color='red', label='Min EE')
+    ax.plot(sizes, EE_mean, color='green', label='Mean EE')
+    ax.plot(sizes, EE_max, color='blue', label='Max EE')
+    ax.set_xlabel(r'Box size [pixels]')
+    ax.set_ylabel(r'Ensquared Energy [ ]')
+    ax.set_xlim([0, sizes[-1]])
+    ax.set_ylim([0, 1.0])
+    ax.set_title(r"EE_%s_SPEC_%s_MODE_%s" % (spaxel_scale, grating, sys_mode))
+    plt.legend()
+
+    save_path = os.path.join(results_path, analysis_dir)
+    fig_name = "PLOT_ENSQ_ENERGY_%s_SPEC_%s_MODE_%s" % (spaxel_scale, grating, sys_mode)
+    if os.path.isfile(os.path.join(save_path, fig_name)):
+        os.remove(os.path.join(save_path, fig_name))
+    fig.savefig(os.path.join(save_path, fig_name))
+
+    return
+
+
+
 if __name__ == """__main__""":
 
     plt.rc('font', family='serif')
@@ -128,6 +198,12 @@ if __name__ == """__main__""":
     #   - 1000 rays: ~ 10 sec per wavelength
 
     plt.show()
+
+    # Show the plot of the Ensquared Energy vs Pixel size
+
+    spaxel_scale = '10x10'
+    ensquared_spaxel_size(zosapi=psa, sys_mode=sys_mode, ao_modes=ao_modes, spaxel_scale=spaxel_scale,
+                                  grating='H', N_rays=N_rays, files_path=files_path, results_path=results_path)
 
     del psa
     psa = None

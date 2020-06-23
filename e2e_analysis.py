@@ -1661,7 +1661,7 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
     """
 
     @staticmethod
-    def analysis_function_ensquared_energy(system, wave_idx, config, surface, slicer_surface, px, py):
+    def analysis_function_ensquared_energy(system, wave_idx, config, surface, slicer_surface, px, py, alpha=2):
         """
         Analysis function to calculate the Geometric Ensquared Energy
 
@@ -1677,6 +1677,7 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
         :param slicer_surface: Zemax surface number for the Image Slicer
         :param px: pupil X coordinates of the rays to be traced
         :param py: pupil Y coordinates of the rays to be traced
+        :param alpha: how many detector pixels and slices to consider
         :return:
         """
 
@@ -1735,8 +1736,8 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
 
         # Count how many rays fall inside a +- 1 mm window in Y, wrt the centroid
         scx, scy = np.mean(slicer_xy[:, 0]), np.mean(slicer_xy[:, 1])
-        below_slicer = slicer_xy[:, 1] < scy + 1.0
-        above_slicer = slicer_xy[:, 1] > scy - 1.0
+        below_slicer = slicer_xy[:, 1] < scy + 1.0 * alpha / 2
+        above_slicer = slicer_xy[:, 1] > scy - 1.0 * alpha / 2
         inside_slicer = (np.logical_and(below_slicer, above_slicer))
         total_slicer = np.sum(inside_slicer)
         index_valid_slicer = np.argwhere(inside_slicer == True)
@@ -1797,8 +1798,8 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
         dcx = np.mean(valid_det_x)      # Detector Centroid X
         dcy = np.mean(valid_det_y)
 
-        left_detector = valid_det_x < dcx + det_pix
-        right_detector = valid_det_x > dcx - det_pix
+        left_detector = valid_det_x < dcx + det_pix * alpha / 2
+        right_detector = valid_det_x > dcx - det_pix * alpha / 2
         inside_detector = (np.logical_and(left_detector, right_detector))
         total_detector = np.sum(inside_detector)
         EE = total_detector / N_rays
@@ -1863,7 +1864,7 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
         return [EE, obj_xy, [scx, scy], [dcx, dcy]]
 
     def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
-                        configuration_idx=None, N_rays=500):
+                        configuration_idx=None, N_rays=500, alpha=2):
         """
         Function that loops over a given set of E2E model Zemax files, running the analysis
         defined by self.analysis_function_ensquared_energy
@@ -1905,7 +1906,7 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
                                         files_dir=files_dir, zemax_file=zemax_file, results_path=results_path,
                                         results_shapes=results_shapes, results_names=results_names,
                                         wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
-                                        slicer_surface=slicer_surface, px=px, py=py)
+                                        slicer_surface=slicer_surface, px=px, py=py, alpha=alpha)
 
             list_results.append(results)
 
