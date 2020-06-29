@@ -223,6 +223,16 @@ def airy_and_slicer(wavelength, scale_mas, PSF_window, N_window):
     x_grid, y_grid = np.meshgrid(x_slice, x_slice)
     slicer_mask = np.abs(y_grid) < scale_mas / 2
 
+
+    fig, ax = plt.subplots(1, 1)
+    img1 = ax.imshow((np.abs(image_electric))**2, extent=[x_min, x_max, x_min, x_max], cmap='bwr')
+    plt.colorbar(img1, ax=ax)
+    ax.set_title(r'Airy Pattern | Wavelength: %.3f $\mu$m' % wavelength)
+    ax.set_xlabel(r'X [mas]')
+    ax.set_ylabel(r'Y [mas]')
+    plt.show()
+
+
     # (2) Propagate the masked electric field to Pupil Plane
     pup_grating = ifft2(fftshift(slicer_mask * image_electric))
     # (2.1) Add pupil mask, this time without the central obscuration
@@ -2010,7 +2020,7 @@ class FWHM_PSF_Analysis(AnalysisGeneric):
         std_x, std_y = np.std(x), np.std(y)
         std = max(std_x, std_y)
         bandwidth = min(std_x, std_y)
-        kde = KernelDensity(kernel='gaussian', bandwidth=bandwidth).fit(XY_valid)
+        kde = KernelDensity(kernel='gaussian', bandwidth=0.5*bandwidth).fit(XY_valid)
 
         # define a grid to compute the PSF
         xmin, xmax = cent_x - PSF_window/2/1000, cent_x + PSF_window/2/1000
@@ -2042,20 +2052,20 @@ class FWHM_PSF_Analysis(AnalysisGeneric):
         psf_diffr = diffraction.add_diffraction(psf_geo, PSF_window, spaxel_scale, wavelength)
         # psf_diffr = add_diffraction(psf_geo, spaxel_scale, wavelength)
 
-        # fig, (ax1, ax2) = plt.subplots(1, 2)
-        # img1 = ax1.imshow(psf_geo, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
-        # plt.colorbar(img1, ax=ax1, orientation='horizontal')
-        # ax1.set_xlabel(r'X [mm]')
-        # ax1.set_ylabel(r'Y [mm]')
-        # ax1.set_title(r'Geometric PSF estimate')
-        #
-        # img2 = ax2.imshow(psf_diffr, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
-        # plt.colorbar(img2, ax=ax2, orientation='horizontal')
-        # ax2.set_xlabel(r'X [mm]')
-        # ax2.set_ylabel(r'Y [mm]')
-        # ax2.set_title(r'Diffraction PSF')
-        #
-        # plt.show()
+        fig, (ax1, ax2) = plt.subplots(1, 2)
+        img1 = ax1.imshow(psf_geo, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
+        plt.colorbar(img1, ax=ax1, orientation='horizontal')
+        ax1.set_xlabel(r'X [mm]')
+        ax1.set_ylabel(r'Y [mm]')
+        ax1.set_title(r'Geometric PSF estimate')
+
+        img2 = ax2.imshow(psf_diffr, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
+        plt.colorbar(img2, ax=ax2, orientation='horizontal')
+        ax2.set_xlabel(r'X [mm]')
+        ax2.set_ylabel(r'Y [mm]')
+        ax2.set_title(r'Diffraction PSF')
+
+        plt.show()
 
 
         # cross_psf = pixelate_crosstalk_psf(psf, PSF_window, N_points)
@@ -2351,15 +2361,15 @@ class RMS_WFE_Analysis(AnalysisGeneric):
         # Get the Field Points for that configuration
         sysField = system.SystemData.Fields
         # check that the field is normalized correctly
-        if sysField.Normalization != constants.FieldNormalizationType_Radial:
-            sysField.Normalization = constants.FieldNormalizationType_Radial
+        # if sysField.Normalization != constants.FieldNormalizationType_Radial:
+        #     sysField.Normalization = constants.FieldNormalizationType_Radial
 
         N_fields = sysField.NumberOfFields
         wavelength = system.SystemData.Wavelengths.GetWavelength(wave_idx).Wavelength
 
-        # Loop over the fields to get the Normalization Radius
-        r_max = np.max([np.sqrt(sysField.GetField(i).X ** 2 +
-                                sysField.GetField(i).Y ** 2) for i in np.arange(1, N_fields + 1)])
+        # # Loop over the fields to get the Normalization Radius
+        # r_max = np.max([np.sqrt(sysField.GetField(i).X ** 2 +
+        #                         sysField.GetField(i).Y ** 2) for i in np.arange(1, N_fields + 1)])
         # print(r_max)
 
         # TODO: make this robust
@@ -2367,9 +2377,12 @@ class RMS_WFE_Analysis(AnalysisGeneric):
         fx_min, fy_min = sysField.GetField(1).X, sysField.GetField(1).Y
         fx_max, fy_max = sysField.GetField(3).X, sysField.GetField(3).Y
 
+        X_MAX = np.max([np.abs(sysField.GetField(i + 1).X) for i in range(3)])
+        Y_MAX = np.max([np.abs(sysField.GetField(i + 1).Y) for i in range(3)])
+
         # Normalized field coordinates (hx, hy)
-        hx_min, hx_max = fx_min / r_max, fx_max / r_max
-        hy_min, hy_max = fy_min / r_max, fy_max / r_max
+        hx_min, hx_max = fx_min / X_MAX, fx_max / X_MAX
+        hy_min, hy_max = fy_min / Y_MAX, fy_max / Y_MAX
 
         # print("h_x : (%.3f, %.3f)" % (hx_min, hx_max))
         # print("h_y : (%.3f, %.3f)" % (hy_min, hy_max))
@@ -2378,7 +2391,7 @@ class RMS_WFE_Analysis(AnalysisGeneric):
         hy = np.linspace(hy_min, hy_max, spaxels_per_slice)
 
         # The Field coordinates for the Object
-        obj_xy = r_max * np.array([hx, hy]).T
+        obj_xy = np.array([X_MAX * hx, Y_MAX * hy]).T
         RMS_WFE = np.empty(spaxels_per_slice)
         foc_xy = np.empty((spaxels_per_slice, 2))
         global_xy = np.empty((spaxels_per_slice, 2))
@@ -2402,7 +2415,7 @@ class RMS_WFE_Analysis(AnalysisGeneric):
         normUnPolData.StartReadingResults()
         for i in range(spaxels_per_slice):
             output = normUnPolData.ReadNextResult()
-            if output[2] == 0 and output[3] == 0:
+            if output[2] == 0:
                 local_xyz[i, 0] = output[4]
                 local_xyz[i, 1] = output[5]
                 local_xyz[i, 2] = output[6]
@@ -2410,6 +2423,23 @@ class RMS_WFE_Analysis(AnalysisGeneric):
                 # Local Focal X Y
                 foc_xy[i, 0] = output[4]
                 foc_xy[i, 1] = output[5]
+
+                # print("\nConfiguration #%d" % config)
+                # print("fx: %.5f fy: %.5f" % (X_MAX * hx[i], Y_MAX * hy[i]))
+                # print("hx: %.5f hy: %.5f" % (hx[i], hy[i]))
+                # x_det, y_det = output[4], output[5]
+                # print("x_det: %.3f y_det: %.3f" % (x_det, y_det))
+
+            # elif output[2] == 0 and output[3] != 0:
+            #     vignetting = output[3]
+            #     surf_name = system.LDE.GetSurfaceAt(vignetting).Comment
+            #     print("\nWARNING: Vignetting at Surface #%d, Name %s" % (vignetting, surf_name))
+            #     print("Wavelength: %.3f | Configuration #%d" % (wavelength, config))
+            #     print("fx: %.5f fy: %.5f" % (X_MAX * hx[i], Y_MAX * hy[i]))
+            #     print("hx: %.5f hy: %.5f" % (hx[i], hy[i]))
+            #     x_det, y_det = output[4], output[5]
+            #     print("x_det: %.3f y_det: %.3f" % (x_det, y_det))
+
 
         normUnPolData.ClearData()
         CastTo(raytrace, 'ISystemTool').Close()

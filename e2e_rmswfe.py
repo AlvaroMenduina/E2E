@@ -94,7 +94,8 @@ def detector_rms_wfe(zosapi, sys_mode, ao_modes, spaxel_scale, spaxels_per_slice
             tpc_odd.set_clim(vmin=min_rms, vmax=max_rms)
             tpc_even = ax.tripcolor(triang_even, _rms_field[:, 1::2].flatten(), shading='flat', cmap='jet')
             tpc_even.set_clim(vmin=min_rms, vmax=max_rms)
-            # ax.scatter(x, y, s=2, color='black')
+            # ax.scatter(x_odd, y_odd, s=2, color='black')
+            # ax.scatter(x_even, y_even, s=2, color='black')
 
             draw_detector_boundary(ax)
 
@@ -113,6 +114,7 @@ def detector_rms_wfe(zosapi, sys_mode, ao_modes, spaxel_scale, spaxels_per_slice
                 os.remove(os.path.join(save_path, fig_name))
             fig.savefig(os.path.join(save_path, fig_name))
 
+
     return rms_field
 
 
@@ -129,9 +131,9 @@ if __name__ == """__main__""":
 
     sys_mode = 'HARMONI'
     ao_modes = ['NOAO']
-    spaxel_scale = '10x10'
-    # gratings = ['Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
-    gratings = ['H', 'H_HIGH']
+    spaxel_scale = '60x30'
+    gratings = ['Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
+    # gratings = ['VIS']
     analysis_dir = os.path.join(results_path, 'RMS_WFE')
 
     rms_grating = []
@@ -145,9 +147,10 @@ if __name__ == """__main__""":
     data = pd.DataFrame(rms_grating, columns=gratings)
 
     fig_box, ax = plt.subplots(1, 1, figsize=(10, 6))
-    sns.boxplot(data=data, ax=ax, hue_order=gratings, palette=sns.color_palette("Blues"))
+    sns.boxplot(data=data, ax=ax, hue_order=gratings, palette=sns.color_palette("Reds"))
     ax.set_ylabel(r'RMS WFE [nm]')
     ax.set_title(r'RMS WFE Detector | %s scale | %s' % (spaxel_scale, sys_mode))
+    ax.set_ylim([0, 500])
 
     fig_name = "RMS_WFE_DETECTOR_%s_%s" % (spaxel_scale, sys_mode)
     if os.path.isfile(os.path.join(analysis_dir, fig_name)):

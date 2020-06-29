@@ -167,8 +167,8 @@ if __name__ == """__main__""":
     sys_mode = 'HARMONI'
     ao_modes = ['NOAO']
     spaxel_scale = '4x4'
-    gratings = ['IZ', 'J', 'IZJ', 'Z_HIGH', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
-    # gratings = ['HK']
+    # gratings = ['IZ', 'J', 'IZJ', 'Z_HIGH', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
+    gratings = ['K_LONG']
     N_rays = 500
     N_waves = 5
     N_configs = 5       # Jump every N_configs, not the total
