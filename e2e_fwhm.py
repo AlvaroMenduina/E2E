@@ -141,12 +141,10 @@ def fwhm_all_gratings(zosapi, sys_mode, ao_modes, spaxel_scale, grating_list, N_
 
     stats = [minX, meanX, maxX, minY, meanY, maxY]
 
-
     return fx_grating, fy_grating, stats
 
 
 if __name__ == """__main__""":
-
 
     plt.rc('font', family='serif')
     plt.rc('text', usetex=False)
@@ -166,9 +164,9 @@ if __name__ == """__main__""":
 
     sys_mode = 'HARMONI'
     ao_modes = ['NOAO']
-    spaxel_scale = '4x4'
-    # gratings = ['IZ', 'J', 'IZJ', 'Z_HIGH', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
-    gratings = ['K_LONG']
+    spaxel_scale = '20x20'
+    gratings = ['VIS', 'IZ', 'J', 'IZJ', 'Z_HIGH', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
+    # gratings = ['H']
     N_rays = 500
     N_waves = 5
     N_configs = 5       # Jump every N_configs, not the total

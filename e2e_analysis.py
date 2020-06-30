@@ -187,56 +187,85 @@ def airy_and_slicer(wavelength, scale_mas, PSF_window, N_window):
     # Print message to know we are updating the cache
     print('Recalculating Airy Pattern for %.3f microns' % wavelength)
 
-    plate_scale = 3.3162  # mm / arcs
+    # Plate scales [Px, Py] for each spaxel scale in mm / arcsec
+    plate_scales = {4.0: [3.75, 7.5], 10.0: [1.5, 3.0], 20.0: [0.75, 1.5], 60.0: [0.5, 0.5]}
+    plate_x = plate_scales[scale_mas][0]
+    plate_y = plate_scales[scale_mas][1]
+
+    # We know how many Microns the pixels of the Geometric PSF span [PSF_window / N_window]
     pix_sampling = PSF_window / N_window  # micron at the detector plane
-    spaxel_scale = pix_sampling / plate_scale  # milliarcsec / pixel
+    # Using the plate scale we calculate how many m.a.s each of those pixels have to span
+    pix_scale_x = pix_sampling / plate_x  # milliarcsec / pixel
+    pix_scale_y = pix_sampling / plate_y  # milliarcsec / pixel
 
     # Calculate the relative size of the pupil aperture needed to ensure the PSF is
-    # sampled with the given spaxel_scale at the detector
+    # sampled with the given pix_scale at the detector
     ELT_DIAM = 39
     MILIARCSECS_IN_A_RAD = 206265000
-    scale_rad = spaxel_scale / MILIARCSECS_IN_A_RAD
-    RHO_APER = scale_rad * ELT_DIAM / (wavelength * 1e-6)
-    RHO_OBSC = 0.30 * RHO_APER  # ELT central obscuration
+    pix_rad_x = pix_scale_x / MILIARCSECS_IN_A_RAD  # radians / pixel
+    pix_rad_y = pix_scale_y / MILIARCSECS_IN_A_RAD
+    RHO_APER_x = pix_rad_x * ELT_DIAM / (wavelength * 1e-6)
+    RHO_APER_y = pix_rad_y * ELT_DIAM / (wavelength * 1e-6)
+    RHO_OBSC_x = 0.30 * RHO_APER_x  # ELT central obscuration
+    RHO_OBSC_y = 0.30 * RHO_APER_y  # ELT central obscuration
 
     # Sanity check
-    SPAXEL_RAD = RHO_APER * wavelength / ELT_DIAM * 1e-6
-    SPAXEL_MAS = SPAXEL_RAD * MILIARCSECS_IN_A_RAD
-    # print(SPAXEL_MAS)
+    PIX_RAD_x = RHO_APER_x * wavelength / ELT_DIAM * 1e-6
+    PIX_RAD_y = RHO_APER_y * wavelength / ELT_DIAM * 1e-6
+    PIX_MAS_x = PIX_RAD_x * MILIARCSECS_IN_A_RAD
+    PIX_MAS_y = PIX_RAD_y * MILIARCSECS_IN_A_RAD
 
     # Define the ELT pupil mask
-    N = 1024
+    N = 2048
     x = np.linspace(-1, 1, N)
     xx, yy = np.meshgrid(x, x)
-    rho = np.sqrt(xx ** 2 + yy ** 2)
+
+    # To get the anamorphic scaling we define the equation for an ellipse
+    rho = np.sqrt((xx / RHO_APER_x) ** 2 + (yy / RHO_APER_y) ** 2)
 
     # (1) Propagate the Image Slicer Focal plane
-    elt_mask = (RHO_OBSC < rho) & (rho < RHO_APER)
+    elt_mask = (RHO_OBSC_x / RHO_APER_x < rho) & (rho < 1.0)
     pupil = elt_mask * np.exp(1j * elt_mask)
     image_electric = fftshift(fft2(pupil))
+
+    # plt.figure()
+    # plt.imshow(elt_mask)
 
     # (1.1) Add slicer effect by masking
     # We mask the PSF covering a band of size 1x SPAXEL, depending on the scale
     # If we have 4x4 mas, then we cover a band of 4 mas over the PSF
-    x_min, x_max = -N/2 * SPAXEL_MAS, N/2 * SPAXEL_MAS
+    x_min, x_max = -N/2 * PIX_MAS_x, N/2 * PIX_MAS_x
+    y_min, y_max = -N/2 * PIX_MAS_y, N/2 * PIX_MAS_y
     x_slice = np.linspace(x_min, x_max, N, endpoint=True)
-    x_grid, y_grid = np.meshgrid(x_slice, x_slice)
+    y_slice = np.linspace(y_min, y_max, N, endpoint=True)
+    x_grid, y_grid = np.meshgrid(x_slice, y_slice)
     slicer_mask = np.abs(y_grid) < scale_mas / 2
 
 
-    fig, ax = plt.subplots(1, 1)
-    img1 = ax.imshow((np.abs(image_electric))**2, extent=[x_min, x_max, x_min, x_max], cmap='bwr')
-    plt.colorbar(img1, ax=ax)
-    ax.set_title(r'Airy Pattern | Wavelength: %.3f $\mu$m' % wavelength)
-    ax.set_xlabel(r'X [mas]')
-    ax.set_ylabel(r'Y [mas]')
-    plt.show()
-
+    # ## Show the PSF both in [mas] space where it should be circular and in [pixel] space where it should be anamorphic
+    # fig, ax = plt.subplots(1, 1)
+    # img1 = ax.imshow((np.abs(image_electric))**2, extent=[x_min, x_max, y_min, y_max], cmap='bwr')
+    # # plt.colorbar(img1, ax=ax)
+    # ax.set_title(r'Airy Pattern | %.1f mas scale | Wavelength: %.3f $\mu$m' % (scale_mas, wavelength))
+    # ax.set_xlabel(r'X [mas]')
+    # ax.set_ylabel(r'Y [mas]')
+    # ax.set_xlim([-10, 10])
+    # ax.set_ylim([-10, 10])
+    #
+    # fig, ax = plt.subplots(1, 1)
+    # img1 = ax.imshow((np.abs(image_electric))**2, extent=[-N/2, N/2, -N/2, N/2], cmap='bwr')
+    # ax.set_title(r'Airy Pattern | %.1f mas scale | Wavelength: %.3f $\mu$m' % (scale_mas, wavelength))
+    # ax.set_xlabel(r'Pixels [ ]')
+    # ax.set_ylabel(r'Pixels [ ]')
+    # ax.set_xlim([-100, 100])
+    # ax.set_ylim([-100, 100])
+    #
+    # plt.show()
 
     # (2) Propagate the masked electric field to Pupil Plane
     pup_grating = ifft2(fftshift(slicer_mask * image_electric))
     # (2.1) Add pupil mask, this time without the central obscuration
-    aperture_mask = rho < RHO_APER
+    aperture_mask = rho < 1.0
 
     # (3) Propagate back to Focal Plane
     final_focal = fftshift(fft2(aperture_mask * pup_grating))
@@ -251,7 +280,7 @@ def airy_and_slicer(wavelength, scale_mas, PSF_window, N_window):
 
     # fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
     # psf_airy = (np.abs(image_electric))**2
-    # img1 = ax1.imshow(psf_airy, extent=[x_min, x_max, x_min, x_max], cmap='bwr')
+    # img1 = ax1.imshow(psf_airy, extent=[x_min, x_max, y_min, y_max], cmap='bwr')
     # ax1.axhline(y=scale_mas/2, linestyle='--', color='black')
     # ax1.axhline(y=-scale_mas/2, linestyle='--', color='black')
     # ax1.set_xlabel(r'X [mas]')
@@ -265,7 +294,7 @@ def airy_and_slicer(wavelength, scale_mas, PSF_window, N_window):
     # ax2.set_xlim([-0.25, 0.25])
     # ax2.set_ylim([-0.25, 0.25])
     #
-    # img3 = ax3.imshow(final_psf, extent=[x_min, x_max, x_min, x_max], cmap='bwr')
+    # img3 = ax3.imshow(final_psf, extent=[x_min, x_max, y_min, y_max], cmap='bwr')
     # ax3.set_xlabel(r'X [mas]')
     # ax3.set_ylabel(r'Y [mas]')
     # ax3.set_xlim([-15, 15])
@@ -2020,7 +2049,7 @@ class FWHM_PSF_Analysis(AnalysisGeneric):
         std_x, std_y = np.std(x), np.std(y)
         std = max(std_x, std_y)
         bandwidth = min(std_x, std_y)
-        kde = KernelDensity(kernel='gaussian', bandwidth=0.5*bandwidth).fit(XY_valid)
+        kde = KernelDensity(kernel='gaussian', bandwidth=bandwidth).fit(XY_valid)
 
         # define a grid to compute the PSF
         xmin, xmax = cent_x - PSF_window/2/1000, cent_x + PSF_window/2/1000
@@ -2052,22 +2081,6 @@ class FWHM_PSF_Analysis(AnalysisGeneric):
         psf_diffr = diffraction.add_diffraction(psf_geo, PSF_window, spaxel_scale, wavelength)
         # psf_diffr = add_diffraction(psf_geo, spaxel_scale, wavelength)
 
-        fig, (ax1, ax2) = plt.subplots(1, 2)
-        img1 = ax1.imshow(psf_geo, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
-        plt.colorbar(img1, ax=ax1, orientation='horizontal')
-        ax1.set_xlabel(r'X [mm]')
-        ax1.set_ylabel(r'Y [mm]')
-        ax1.set_title(r'Geometric PSF estimate')
-
-        img2 = ax2.imshow(psf_diffr, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
-        plt.colorbar(img2, ax=ax2, orientation='horizontal')
-        ax2.set_xlabel(r'X [mm]')
-        ax2.set_ylabel(r'Y [mm]')
-        ax2.set_title(r'Diffraction PSF')
-
-        plt.show()
-
-
         # cross_psf = pixelate_crosstalk_psf(psf, PSF_window, N_points)
         # PSF_cube[:, :] = cross_psf
         # N_cross = cross_psf.shape[0]
@@ -2080,6 +2093,21 @@ class FWHM_PSF_Analysis(AnalysisGeneric):
         fwhm_x, fwhm_y, theta = diffraction.fit_psf_to_gaussian(xx=xx_grid, yy=yy_grid, psf_data=psf_diffr, x0=cent_x, y0=cent_y)
         # sigmaX, sigmaY, theta = fit_gaussian(xx=xx_grid, yy=yy_grid, data=psf_diffr, x0=cent_x, y0=cent_y)
         # print("FWHM_x: %.1f | FWHM_y: %.1f | Theta: %.1f" % (fwhm_x, fwhm_y, np.rad2deg(theta)))
+
+        # fig, (ax1, ax2) = plt.subplots(1, 2)
+        # img1 = ax1.imshow(psf_geo, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
+        # plt.colorbar(img1, ax=ax1, orientation='horizontal')
+        # ax1.set_xlabel(r'X [mm]')
+        # ax1.set_ylabel(r'Y [mm]')
+        # ax1.set_title(r'Geometric PSF estimate')
+        #
+        # img2 = ax2.imshow(psf_diffr, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
+        # plt.colorbar(img2, ax=ax2, orientation='horizontal')
+        # ax2.set_xlabel(r'X [mm]')
+        # ax2.set_ylabel(r'Y [mm]')
+        # ax2.set_title(r'Diffr. PSF | %.3f microns | %.1f mas | FWHM_x: %.1f | FWHM_y: %.1f microns' % (wavelength, spaxel_scale, fwhm_x, fwhm_y))
+        #
+        # plt.show()
 
         # fwhm_x = 2 * np.sqrt(2 * np.log(2)) * sigmaX * 1000
         # # fwhm_x_cross = 2 * np.sqrt(2 * np.log(2)) * sigmaX_cross * 1000
