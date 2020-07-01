@@ -129,8 +129,8 @@ def fwhm_all_gratings(zosapi, sys_mode, ao_modes, spaxel_scale, grating_list, N_
     sns.boxplot(data=data_y, ax=ax2, hue_order=grating_list, palette=sns.color_palette("Reds"))
     ax1.set_ylim([min_val, max_val])
     ax2.set_ylim([min_val, max_val])
-    ax1.set_title('FWHM Along Slice [X]')
-    ax2.set_title('FWHM Across Slice [Y]')
+    ax1.set_title('FWHM Along Slice [X] | %s scale | %s mode' % (spaxel_scale, sys_mode))
+    ax2.set_title('FWHM Across Slice [Y] | %s scale | %s mode' % (spaxel_scale, sys_mode))
     ax1.set_ylabel('FWHM [$\mu$m]')
     ax2.set_ylabel('FWHM [$\mu$m]')
 
@@ -164,7 +164,7 @@ if __name__ == """__main__""":
 
     sys_mode = 'HARMONI'
     ao_modes = ['NOAO']
-    spaxel_scale = '20x20'
+    spaxel_scale = '4x4'
     gratings = ['VIS', 'IZ', 'J', 'IZJ', 'Z_HIGH', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
     # gratings = ['H']
     N_rays = 500

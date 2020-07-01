@@ -1980,20 +1980,13 @@ class FWHM_PSF_Analysis(AnalysisGeneric):
         r_max = np.max([np.sqrt(sysField.GetField(i).X ** 2 +
                                 sysField.GetField(i).Y ** 2) for i in np.arange(1, N_fields + 1)])
 
-        # fy_mean = np.mean([sysField.GetField(i).Y for i in np.arange(1, N_fields + 1)])
-        # fx_mean = 1/2 * np.sum([sysField.GetField(i).X for i in np.arange(1, N_fields + 1)])
-        #
-        # ## Add some extra field to get a better sampling
-        # sysField.AddField(fx_mean, fy_mean, 1)
-        # sysField.AddField(fx_mean / 3.0, fy_mean, 1)
-        # N_fields = sysField.NumberOfFields
 
         N_rays = px.shape[0]
 
         XY = np.empty((N_rays, 2))
-        FWHM = np.zeros((3))          # [mean_radius, m_radiusX, m_radiusY]
-        obj_xy = np.zeros((2))        # (fx, fy) coordinates for the chief ray
-        foc_xy = np.empty((2))        # raytrace results of the Centroid
+        FWHM = np.zeros(3)          # [mean_radius, m_radiusX, m_radiusY]
+        obj_xy = np.zeros(2)        # (fx, fy) coordinates for the chief ray
+        foc_xy = np.empty(2)        # raytrace results of the Centroid
         N = int(PSF_window / 15)
         PSF_cube = np.empty((N, N))
 
@@ -2054,8 +2047,6 @@ class FWHM_PSF_Analysis(AnalysisGeneric):
         # define a grid to compute the PSF
         xmin, xmax = cent_x - PSF_window/2/1000, cent_x + PSF_window/2/1000
         ymin, ymax = cent_y - PSF_window/2/1000, cent_y + PSF_window/2/1000
-        # xmin, xmax = cent_x - PSF_window/2/1000 + 7.5 / 1000, cent_x + PSF_window/2/1000 + 7.5 / 1000
-        # ymin, ymax = cent_y - PSF_window/2/1000 + 7.5 / 1000, cent_y + PSF_window/2/1000 + 7.5 / 1000
         x_grid = np.linspace(xmin, xmax, N_points)
         y_grid = np.linspace(ymin, ymax, N_points)
         xx_grid, yy_grid = np.meshgrid(x_grid, y_grid)
@@ -2094,25 +2085,20 @@ class FWHM_PSF_Analysis(AnalysisGeneric):
         # sigmaX, sigmaY, theta = fit_gaussian(xx=xx_grid, yy=yy_grid, data=psf_diffr, x0=cent_x, y0=cent_y)
         # print("FWHM_x: %.1f | FWHM_y: %.1f | Theta: %.1f" % (fwhm_x, fwhm_y, np.rad2deg(theta)))
 
-        # fig, (ax1, ax2) = plt.subplots(1, 2)
-        # img1 = ax1.imshow(psf_geo, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
-        # plt.colorbar(img1, ax=ax1, orientation='horizontal')
-        # ax1.set_xlabel(r'X [mm]')
-        # ax1.set_ylabel(r'Y [mm]')
-        # ax1.set_title(r'Geometric PSF estimate')
-        #
-        # img2 = ax2.imshow(psf_diffr, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
-        # plt.colorbar(img2, ax=ax2, orientation='horizontal')
-        # ax2.set_xlabel(r'X [mm]')
-        # ax2.set_ylabel(r'Y [mm]')
-        # ax2.set_title(r'Diffr. PSF | %.3f microns | %.1f mas | FWHM_x: %.1f | FWHM_y: %.1f microns' % (wavelength, spaxel_scale, fwhm_x, fwhm_y))
-        #
-        # plt.show()
+        fig, (ax1, ax2) = plt.subplots(1, 2)
+        img1 = ax1.imshow(psf_geo, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
+        plt.colorbar(img1, ax=ax1, orientation='horizontal')
+        ax1.set_xlabel(r'X [mm]')
+        ax1.set_ylabel(r'Y [mm]')
+        ax1.set_title(r'Geometric PSF estimate')
 
-        # fwhm_x = 2 * np.sqrt(2 * np.log(2)) * sigmaX * 1000
-        # # fwhm_x_cross = 2 * np.sqrt(2 * np.log(2)) * sigmaX_cross * 1000
-        # fwhm_y = 2 * np.sqrt(2 * np.log(2)) * sigmaY * 1000
-        # fwhm_y_cross = 2 * np.sqrt(2 * np.log(2)) * sigmaY_cross * 1000
+        img2 = ax2.imshow(psf_diffr, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
+        plt.colorbar(img2, ax=ax2, orientation='horizontal')
+        ax2.set_xlabel(r'X [mm]')
+        ax2.set_ylabel(r'Y [mm]')
+        ax2.set_title(r'Diffr. PSF | %.3f microns | %.1f mas | FWHM_x: %.1f | FWHM_y: %.1f microns' % (wavelength, spaxel_scale, fwhm_x, fwhm_y))
+
+        plt.show()
 
         # if fwhm_x < 5 or fwhm_y < 5:
 
@@ -2148,14 +2134,6 @@ class FWHM_PSF_Analysis(AnalysisGeneric):
         FWHM[:] = [fwhm_x, fwhm_y, theta]        # Store the results
 
         plt.show()
-        #
-        # plt.show(block=False)
-        # plt.pause(0.05)
-        # plt.close(fig)
-
-        # # Remember to remove the extra fields otherwise they pile up
-        # sysField.RemoveField(N_fields)
-        # sysField.RemoveField(N_fields - 1)
 
         return [FWHM, PSF_cube, obj_xy, foc_xy]
 
