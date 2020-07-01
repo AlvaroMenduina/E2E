@@ -152,8 +152,8 @@ if __name__ == """__main__""":
     # Create a Python Standalone Application
     psa = e2e.PythonStandaloneApplication()
 
-    files_path = os.path.abspath("D:\End to End Model\June_2020")
-    results_path = os.path.abspath("D:\End to End Model\Results_June")
+    files_path = os.path.abspath("D:\End to End Model\June_John2020")
+    results_path = os.path.abspath("D:\End to End Model\Results_JuneJohn")
 
     analysis_dir = os.path.join(results_path, 'FWHM')
     print("Analysis Results will be saved in folder: ", analysis_dir)

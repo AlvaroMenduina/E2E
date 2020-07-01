@@ -2189,8 +2189,11 @@ class FWHM_PSF_Analysis(AnalysisGeneric):
             mas_dict = {'4x4': 4.0, '10x10': 10.0, '20x20': 20.0, '60x30': 60.0}
             spaxel_scale = mas_dict[settings['scale']]
 
+            # We need to know what is the Surface Number for the Image Slicer in the Zemax file
+            slicer_surface = focal_planes[settings['system']][settings['scale']][settings['ifu']]['IS']
+
             list_results = self.run_analysis(analysis_function=self.analysis_function_geofwhm_psf,
-                                             files_dir=files_dir,zemax_file=zemax_file, results_path=results_path,
+                                             files_dir=files_dir, zemax_file=zemax_file, results_path=results_path,
                                              results_shapes=results_shapes, results_names=results_names,
                                              wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
                                              surface=surface, px=px, py=py, spaxel_scale=spaxel_scale,
