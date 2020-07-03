@@ -1954,7 +1954,6 @@ class EnsquaredEnergyAnalysis(AnalysisGeneric):
         return list_results
 
 
-
 class FWHM_PSF_Analysis(AnalysisGeneric):
     """
     Calculate the Geometric FWHM of the PSF
@@ -2117,6 +2116,10 @@ class FWHM_PSF_Analysis(AnalysisGeneric):
                 detector_xy[i, 1] = output[5]
                 checksum_detector += 1
                 valid_index_detector.append(i)
+            elif output[2] == 0 and output[3] != 0:
+                vignette_code = output[3]
+                vignette_surf = system.LDE.GetSurfaceAt(vignette_code).Comment
+                print("Vignetting at surface #%d: %s" % (vignette_code, vignette_surf))
 
         # if checksum_detector < N_rays:
         #     print(checksum_detector)
