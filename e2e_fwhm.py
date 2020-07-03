@@ -121,16 +121,18 @@ def fwhm_all_gratings(zosapi, sys_mode, ao_modes, spaxel_scale, grating_list, N_
     data_x = pd.DataFrame(fx_grating, columns=grating_list)
     data_y = pd.DataFrame(fy_grating, columns=grating_list)
 
-    max_val = np.round(max(np.max(fx_grating), np.max(fy_grating))) + 2
-    min_val = np.floor(min(np.min(fx_grating), np.min(fy_grating))) - 2
+    # max_val = np.round(max(np.max(fx_grating), np.max(fy_grating))) + 2
+    max_valx = np.round(np.nanmax(fx_grating)) + 2
+    max_valy = np.round(np.nanmax(fy_grating)) + 5
+    min_val = np.floor(min(np.nanmin(fx_grating), np.nanmin(fy_grating))) - 2
 
     fig_box, (ax1, ax2) = plt.subplots(2, 1, figsize=(16, 8))
     sns.boxplot(data=data_x, ax=ax1, hue_order=grating_list, palette=sns.color_palette("Blues"))
     sns.boxplot(data=data_y, ax=ax2, hue_order=grating_list, palette=sns.color_palette("Reds"))
-    ax1.set_ylim([min_val, max_val])
-    ax2.set_ylim([min_val, max_val])
-    ax1.set_title('FWHM Along Slice [X] | %s scale | %s mode' % (spaxel_scale, sys_mode))
-    ax2.set_title('FWHM Across Slice [Y] | %s scale | %s mode' % (spaxel_scale, sys_mode))
+    ax1.set_ylim([min_val, max_valx])
+    ax2.set_ylim([min_val, max_valy])
+    ax1.set_title('FWHM Along Slice [X] Detector Plane | %s scale | %s mode' % (spaxel_scale, sys_mode))
+    ax2.set_title('FWHM Across Slice [Y] Image Slicer | %s scale | %s mode' % (spaxel_scale, sys_mode))
     ax1.set_ylabel('FWHM [$\mu$m]')
     ax2.set_ylabel('FWHM [$\mu$m]')
 
@@ -164,10 +166,10 @@ if __name__ == """__main__""":
 
     sys_mode = 'HARMONI'
     ao_modes = ['NOAO']
-    spaxel_scale = '4x4'
+    spaxel_scale = '60x30'
     gratings = ['VIS', 'IZ', 'J', 'IZJ', 'Z_HIGH', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
     # gratings = ['H']
-    N_rays = 500
+    N_rays = 1000
     N_waves = 5
     N_configs = 5       # Jump every N_configs, not the total
 

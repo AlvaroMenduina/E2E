@@ -170,7 +170,7 @@ class PythonStandaloneApplication(object):
 
 MAX_WAVES = 23
 @functools.lru_cache(maxsize=MAX_WAVES)
-def airy_and_slicer(wavelength, scale_mas, PSF_window, N_window):
+def airy_and_slicer(surface, wavelength, scale_mas, PSF_window, N_window):
     """
 
     Since the calculations here are rather time-consuming
@@ -188,9 +188,10 @@ def airy_and_slicer(wavelength, scale_mas, PSF_window, N_window):
     print('Recalculating Airy Pattern for %.3f microns' % wavelength)
 
     # Plate scales [Px, Py] for each spaxel scale in mm / arcsec
-    plate_scales = {4.0: [3.75, 7.5], 10.0: [1.5, 3.0], 20.0: [0.75, 1.5], 60.0: [0.5, 0.5]}
-    plate_x = plate_scales[scale_mas][0]
-    plate_y = plate_scales[scale_mas][1]
+    plate_scales = {'IS': {4.0: [125, 250], 10.0: [50, 100], 20.0: [25, 50], 60.0: [16.67, 16.67]},
+                    'DET': {4.0: [3.75, 7.5], 10.0: [1.5, 3.0], 20.0: [0.75, 1.5], 60.0: [0.5, 0.5]}}
+    plate_x = plate_scales[surface][scale_mas][0]
+    plate_y = plate_scales[surface][scale_mas][1]
 
     # We know how many Microns the pixels of the Geometric PSF span [PSF_window / N_window]
     pix_sampling = PSF_window / N_window  # micron at the detector plane
@@ -314,7 +315,7 @@ class DiffractionEffects(object):
 
         return
 
-    def add_diffraction(self, psf_geo, PSF_window, scale_mas, wavelength):
+    def add_diffraction(self, surface, psf_geo, PSF_window, scale_mas, wavelength):
         """
         Calculate the diffraction effects which include:
             - ELT pupil diffraction
@@ -332,7 +333,7 @@ class DiffractionEffects(object):
 
         # Calculate the diffraction effects
         N_window = psf_geo.shape[0]
-        diffraction = airy_and_slicer(wavelength=wavelength, scale_mas=scale_mas,
+        diffraction = airy_and_slicer(surface=surface, wavelength=wavelength, scale_mas=scale_mas,
                                       PSF_window=PSF_window, N_window=N_window)
 
         # Convolve the diffraction effects with the geometric PSF
@@ -342,7 +343,7 @@ class DiffractionEffects(object):
 
         return psf_convol
 
-    def gaussian2d(self, xy_data, x0, y0, sigma_x, sigma_y, theta, amplitude, offset):
+    def gaussian2d(self, xy_data, x0, y0, sigma_x, sigma_y, amplitude, offset):
         """
         A 2D Gaussian evaluated the points in xy_data with the following characteristics:
         Centred at (x0, y0), with sigma_x, sigma_y, rotated by theta radians
@@ -357,6 +358,7 @@ class DiffractionEffects(object):
         :param offset:
         :return:
         """
+        theta = 0.0
         (x, y) = xy_data
         x0 = float(x0)
         y0 = float(y0)
@@ -380,12 +382,12 @@ class DiffractionEffects(object):
         rotation0 = 0.0              # Guesses
         # We guess that the FWHM will be around 2 detector pixels [30 microns]
         # Using the formula for a Gaussian FWHM = 2 sqrt(2 ln(2)) Sigma
-        sigma_fwhm = 30e-3 / 2 * np.sqrt(2 * np.log(2))
+        sigma_fwhm = 100e-3 / 2 * np.sqrt(2 * np.log(2))
         sigmax0, sigmay0 = sigma_fwhm, sigma_fwhm
 
-        guess_param = [x0, y0, sigmax0, sigmay0, rotation0, peak0, offset0]
-        bounds = ([-np.inf, -np.inf, 0.0, 0.0, -np.pi / 4, 0, -np.inf],
-                  [np.inf, np.inf, np.inf, np.inf, np.pi / 4, np.inf, np.inf])
+        guess_param = [x0, y0, sigmax0, sigmay0, peak0, offset0]
+        bounds = ([-np.inf, -np.inf, 0.0, 0.0, 0, -np.inf],
+                  [np.inf, np.inf, np.inf, np.inf, np.inf, np.inf])
         # we don't let the theta vary more than +-45 degrees because that would
         # flip the values of FWHM_X and FWHM_Y
 
@@ -398,7 +400,7 @@ class DiffractionEffects(object):
         except RuntimeError:    # If it fails to converge
 
             sigmaX, sigmaY, theta = np.nan, np.nan, np.nan
-            raise ValueError("Gaussian Fit of the PSF failed!")
+            print("\n[WARNING] Gaussian Fit of the PSF failed!")
 
         fwhm_x = 2 * np.sqrt(2 * np.log(2)) * sigmaX * 1000
         fwhm_y = 2 * np.sqrt(2 * np.log(2)) * sigmaY * 1000
@@ -1960,89 +1962,16 @@ class FWHM_PSF_Analysis(AnalysisGeneric):
     and estimating the diameter of the 50% contour line
     """
 
-    def analysis_function_geofwhm_psf(self, system, wave_idx, config, surface, px, py, spaxel_scale, N_points,
-                                      PSF_window, reference='Centroid'):
+    def calculate_fwhm(self, surface, xy_data, PSF_window, N_points, spaxel_scale, wavelength):
 
-
-        # print("Config: ", config)
-        # Set Current Configuration
-        system.MCE.SetCurrentConfiguration(config)
-
-        # Get the Field Points for that configuration
-        sysField = system.SystemData.Fields
-
-        N_fields = sysField.NumberOfFields
-        # check that the field is normalized correctly
-        if sysField.Normalization != constants.FieldNormalizationType_Radial:
-            sysField.Normalization = constants.FieldNormalizationType_Radial
-
-        # Loop over the fields to get the Normalization Radius
-        r_max = np.max([np.sqrt(sysField.GetField(i).X ** 2 +
-                                sysField.GetField(i).Y ** 2) for i in np.arange(1, N_fields + 1)])
-
-
-        N_rays = px.shape[0]
-
-        XY = np.empty((N_rays, 2))
-        FWHM = np.zeros(3)          # [mean_radius, m_radiusX, m_radiusY]
-        obj_xy = np.zeros(2)        # (fx, fy) coordinates for the chief ray
-        foc_xy = np.empty(2)        # raytrace results of the Centroid
-        N = int(PSF_window / 15)
-        PSF_cube = np.empty((N, N))
-
-        if config == 1:
-            print("\nTracing %d rays to calculate FWHM PSF" % (N_rays))
-
-        fx, fy = sysField.GetField(2).X, sysField.GetField(2).Y
-        hx, hy = fx / r_max, fy / r_max      # Normalized field coordinates (hx, hy)
-        obj_xy[:] = [fx, fy]
-
-        raytrace = system.Tools.OpenBatchRayTrace()
-        normUnPolData = raytrace.CreateNormUnpol(N_rays, constants.RaysType_Real, surface)
-
-        for (p_x, p_y) in zip(px, py):
-            normUnPolData.AddRay(wave_idx, hx, hy, p_x, p_y, constants.OPDMode_None)
-
-        CastTo(raytrace, 'ISystemTool').RunAndWaitForCompletion()
-        normUnPolData.StartReadingResults()
-        checksum = 0
-        vignetted = 0
-        valid_index = []
-        for i in range(N_rays):
-            output = normUnPolData.ReadNextResult()
-            if output[2] == 0 and output[3] == 0:
-                XY[i, 0] = output[4]
-                XY[i, 1] = output[5]
-                checksum += 1
-                valid_index.append(i)
-
-            elif output[2] == 0 and output[3] != 0:
-                vignette_code = output[3]
-                vignetted += 1
-
-        # print("Rays that made it to the Detector: %d / %d" % (checksum, N_rays))
-        # print("Rays that are vignetted: %d / %d" % (vignetted, N_rays))
-
-        normUnPolData.ClearData()
-        CastTo(raytrace, 'ISystemTool').Close()
-
-        # Calculate the FWHM
-        x, y = XY[:, 0][valid_index], XY[:, 1][valid_index]
-        XY_valid = np.stack([x, y]).T
-
+        start = time()
+        # Calculate the Geometric PSF
+        x, y = xy_data[:, 0], xy_data[:, 1]
         cent_x, cent_y = np.mean(x), np.mean(y)
-        foc_xy[:] = [cent_x, cent_y]
-
-        # Select what point will be used as Reference for the FWHM
-        if reference == "Centroid":
-            ref_x, ref_y = cent_x, cent_y
-        else:
-            raise ValueError("reference should be 'ChiefRay' or 'Centroid'")
 
         std_x, std_y = np.std(x), np.std(y)
-        std = max(std_x, std_y)
         bandwidth = min(std_x, std_y)
-        kde = KernelDensity(kernel='gaussian', bandwidth=bandwidth).fit(XY_valid)
+        kde = KernelDensity(kernel='gaussian', bandwidth=0.5*bandwidth).fit(xy_data)
 
         # define a grid to compute the PSF
         xmin, xmax = cent_x - PSF_window/2/1000, cent_x + PSF_window/2/1000
@@ -2057,81 +1986,176 @@ class FWHM_PSF_Analysis(AnalysisGeneric):
         psf_geo /= np.max(psf_geo)
         psf_geo = psf_geo.reshape(xx_grid.shape)
 
-        # fig, ax = plt.subplots(1, 1)
-        # img = ax.imshow(psf_geo, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
-        # ax.scatter(x, y, color='black', s=3)
-        # # ax.set_xlim([cent_x - 0.015, cent_x + 0.015])
-        # # ax.set_ylim([cent_y - 0.015, cent_y + 0.015])
-        # plt.show()
+        # time_geopsf = time() - start
 
-        # Up to here the PSF is Geometric (just tracing rays)
-        # Nowe we add various diffraction effects
+        # plt.figure()
+        # img = plt.imshow(psf_geo, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
+        # plt.scatter(x, y, s=2, color='black')
+        # plt.xlabel(r'X [mm]')
+        # plt.ylabel(r'Y [mm]')
+        # plt.title('PSF | %d pixels | %.1f $\mu$m / pixel' % (N_points, PSF_window / N_points))
 
-        wavelength = system.SystemData.Wavelengths.GetWavelength(wave_idx).Wavelength
-        # Add diffraction
-        psf_diffr = diffraction.add_diffraction(psf_geo, PSF_window, spaxel_scale, wavelength)
-        # psf_diffr = add_diffraction(psf_geo, spaxel_scale, wavelength)
+        # start = time()
 
-        # cross_psf = pixelate_crosstalk_psf(psf, PSF_window, N_points)
-        # PSF_cube[:, :] = cross_psf
-        # N_cross = cross_psf.shape[0]
+        psf_diffr = diffraction.add_diffraction(surface=surface, psf_geo=psf_geo, PSF_window=PSF_window,
+                                                scale_mas=spaxel_scale, wavelength=wavelength)
+        # time_diffpsf = time() - start
         #
-        # x_cross = np.linspace(xmin, xmax, N_cross)
-        # y_cross = np.linspace(ymin, ymax, N_cross)
-        # xx_cross, yy_cross = np.meshgrid(x_cross, y_cross)
+        # start = time()
+
+        # guesses = {'IS': {4.0: }}
 
         # Fit the PSF to a 2D Gaussian
         fwhm_x, fwhm_y, theta = diffraction.fit_psf_to_gaussian(xx=xx_grid, yy=yy_grid, psf_data=psf_diffr, x0=cent_x, y0=cent_y)
-        # sigmaX, sigmaY, theta = fit_gaussian(xx=xx_grid, yy=yy_grid, data=psf_diffr, x0=cent_x, y0=cent_y)
-        # print("FWHM_x: %.1f | FWHM_y: %.1f | Theta: %.1f" % (fwhm_x, fwhm_y, np.rad2deg(theta)))
 
-        fig, (ax1, ax2) = plt.subplots(1, 2)
-        img1 = ax1.imshow(psf_geo, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
-        plt.colorbar(img1, ax=ax1, orientation='horizontal')
-        ax1.set_xlabel(r'X [mm]')
-        ax1.set_ylabel(r'Y [mm]')
-        ax1.set_title(r'Geometric PSF estimate')
+        # time_gauss = time() - start
+        #
+        # print('FWHM time: %.3f sec for GeoPSF estimate:' % time_geopsf)
+        # print('FWHM time: %.3f sec for DiffPSF convolution:' % time_diffpsf)
+        # print('FWHM time: %.3f sec for Gaussian fit:' % time_gauss)
 
-        img2 = ax2.imshow(psf_diffr, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
-        plt.colorbar(img2, ax=ax2, orientation='horizontal')
-        ax2.set_xlabel(r'X [mm]')
-        ax2.set_ylabel(r'Y [mm]')
-        ax2.set_title(r'Diffr. PSF | %.3f microns | %.1f mas | FWHM_x: %.1f | FWHM_y: %.1f microns' % (wavelength, spaxel_scale, fwhm_x, fwhm_y))
+        # fig, (ax1, ax2) = plt.subplots(1, 2)
+        # img1 = ax1.imshow(psf_geo, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
+        # plt.colorbar(img1, ax=ax1, orientation='horizontal')
+        # ax1.set_xlabel(r'X [mm]')
+        # ax1.set_ylabel(r'Y [mm]')
+        # ax1.set_title(r'Geometric PSF estimate | Surface: %s' % surface)
+        #
+        # img2 = ax2.imshow(psf_diffr, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
+        # plt.colorbar(img2, ax=ax2, orientation='horizontal')
+        # ax2.set_xlabel(r'X [mm]')
+        # ax2.set_ylabel(r'Y [mm]')
+        # if surface == 'DET':
+        #     ax2.set_title(r'Diffr. PSF | %.3f microns | %.1f mas | FWHM_x: %.1f $\mu$m' % (wavelength, spaxel_scale, fwhm_x))
+        # elif surface == 'IS':
+        #     ax2.set_title(r'Diffr. PSF | %.3f microns | %.1f mas | FWHM_y: %.1f $\mu$m' % (wavelength, spaxel_scale, fwhm_y))
 
-        plt.show()
+        return fwhm_x, fwhm_y
 
-        # if fwhm_x < 5 or fwhm_y < 5:
+    def analysis_function_geofwhm_psf(self, system, wave_idx, config, surface, slicer_surface, px, py, spaxel_scale,
+                                      N_points, PSF_window):
 
-        # # print("FWHM_x: %.1f | FWHM_y: %.1f | Theta: %.1f" % (fwhm_x_cross, fwhm_y_cross, np.rad2deg(theta_cross)))
-        #
-        #
-        #
-        #     fig, (ax1, ax2, ax3, ax4) = plt.subplots(1, 4)
-        #     img1 = ax1.imshow(psf, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
-        #     ax1.scatter(x, y, s=3, color='black', alpha=0.5)
-        #     plt.colorbar(img1, ax=ax1, orientation='horizontal')
-        #     ax1.set_title('Ray Data')
-        #
-        #     img2 = ax2.imshow(cross_psf, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
-        #     plt.colorbar(img2, ax=ax2, orientation='horizontal')
-        #     ax2.set_title(r'Pixelation + Crosstalk')
-        #
-        #     # img3 = ax3.imshow(cross_psf, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
-        #     # plt.colorbar(img3, ax=ax3, orientation='horizontal')
-        #     #
-        #     fit = twoD_Gaussian(data_tuple=(xx_grid, yy_grid), x0=cent_x, y0=cent_y, sigma_x=sigmaX, sigma_y=sigmaY,
-        #                         theta=theta, amplitude=1.0, offset=0.0)
-        #     img3 = ax3.imshow(fit, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
-        #     plt.colorbar(img3, ax=ax3, orientation='horizontal')
-        #     ax3.set_title(r'Guassian Fit (High Res)')
-        #
-        #     fit = twoD_Gaussian(data_tuple=(xx_cross, yy_cross), x0=cent_x, y0=cent_y, sigma_x=sigmaX, sigma_y=sigmaY,
-        #                         theta=theta, amplitude=1.0, offset=0.0)
-        #     img4 = ax4.imshow(fit, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
-        #     ax4.set_title(r'Guassian Fit (Pixelated)')
-        #     plt.colorbar(img4, ax=ax4, orientation='horizontal')
 
-        FWHM[:] = [fwhm_x, fwhm_y, theta]        # Store the results
+        # print("Config: ", config)
+        # Set Current Configuration
+        # start = time()
+        system.MCE.SetCurrentConfiguration(config)
+
+        wavelength = system.SystemData.Wavelengths.GetWavelength(wave_idx).Wavelength
+
+        # Get the Field Points for that configuration
+        sysField = system.SystemData.Fields
+
+        N_fields = sysField.NumberOfFields
+
+        N_rays = px.shape[0]
+
+        XY = np.empty((N_rays, 2))
+        FWHM = np.zeros(2)          # [mean_radius, m_radiusX, m_radiusY]
+        obj_xy = np.zeros(2)        # (fx, fy) coordinates for the chief ray
+        foc_xy = np.empty(2)        # raytrace results of the Centroid
+        N = int(PSF_window / 15)
+        PSF_cube = np.empty((N, N))
+
+        if config == 1:
+            print("\nTracing %d rays to calculate FWHM PSF" % (N_rays))
+
+        # (0) Define the Field coordinates for the Chief Ray, at the centre of the Slice
+        X_MAX = np.max([np.abs(sysField.GetField(i + 1).X) for i in range(N_fields)])
+        Y_MAX = np.max([np.abs(sysField.GetField(i + 1).Y) for i in range(N_fields)])
+
+        fx, fy = sysField.GetField(2).X, sysField.GetField(2).Y
+        hx, hy = fx / X_MAX, fy / Y_MAX      # Normalized field coordinates (hx, hy)
+        obj_xy[:] = [fx, fy]
+
+        # We need to trace rays up to the Image Slicer and then up to the Detector
+        slicer_xy = np.empty((N_rays, 2))
+        detector_xy = np.empty((N_rays, 2))
+
+        # (1) Run the raytrace up to the IMAGE SLICER
+        raytrace = system.Tools.OpenBatchRayTrace()
+        # remember to specify the surface to which you are tracing!
+        rays_slicer = raytrace.CreateNormUnpol(N_rays, constants.RaysType_Real, slicer_surface)
+        for (p_x, p_y) in zip(px, py):      # Add the ray to the RayTrace
+            rays_slicer.AddRay(wave_idx, hx, hy, p_x, p_y, constants.OPDMode_None)
+        CastTo(raytrace, 'ISystemTool').RunAndWaitForCompletion()
+        rays_slicer.StartReadingResults()
+        checksum_slicer = 0
+        valid_index_slicer = []
+        for i in range(N_rays):     # Get Raytrace results at the Image Slicer
+            output = rays_slicer.ReadNextResult()
+            if output[2] == 0 and output[3] == 0:
+                slicer_xy[i, 0] = output[4]
+                slicer_xy[i, 1] = output[5]
+                valid_index_slicer.append(i)
+                checksum_slicer += 1
+        # if checksum_slicer < N_rays:
+        #     print(checksum_slicer)
+            # raise ValueError('Some rays were lost before the Image Slicer')
+
+        rays_slicer.ClearData()
+
+        # time_ray_slicer = time() - start
+        # start = time()
+
+        # (2) Run the raytrace up to the DETECTOR
+        # Detector is always the last surface
+        detector_surface = system.LDE.NumberOfSurfaces - 1
+        # For speed, we re-use the same Raytrace, just define new rays!
+        # raytrace_det = system.Tools.OpenBatchRayTrace()
+        rays_detector = raytrace.CreateNormUnpol(N_rays, constants.RaysType_Real, detector_surface)
+        for (p_x, p_y) in zip(px, py):
+            rays_detector.AddRay(wave_idx, hx, hy, p_x, p_y, constants.OPDMode_None)
+        CastTo(raytrace, 'ISystemTool').RunAndWaitForCompletion()
+        rays_detector.StartReadingResults()
+        checksum_detector = 0
+        valid_index_detector = []       # Valid means they make it to the detector even if vignetted at the Slicer
+        for i in range(N_rays):
+            output = rays_detector.ReadNextResult()
+            if output[2] == 0:      # ErrorCode & VignetteCode
+                detector_xy[i, 0] = output[4]
+                detector_xy[i, 1] = output[5]
+                checksum_detector += 1
+                valid_index_detector.append(i)
+
+        # if checksum_detector < N_rays:
+        #     print(checksum_detector)
+        #     print('Some rays were lost at the Detector')
+        # print("\nValid Rays: Slicer %d | Detector %d" % (checksum_slicer, checksum_detector))
+
+        rays_detector.ClearData()
+        CastTo(raytrace, 'ISystemTool').Close()
+
+        # time_ray_det = time() - start
+        # print("Raytrace time: %.3f sec for Image Slicer | %.3f sec for Detector" % (time_ray_slicer, time_ray_det))
+
+
+
+        # ============================================================================================================ #
+        #                                            PSF Calculations
+        # ============================================================================================================ #
+
+        xy_data_slicer = np.stack([slicer_xy[:, 0][valid_index_slicer], slicer_xy[:, 1][valid_index_slicer]]).T
+        xy_data_detector = np.stack([detector_xy[:, 0][valid_index_detector], detector_xy[:, 1][valid_index_detector]]).T
+        start = time()
+        fwhm_x_slicer, fwhm_y_slicer = self.calculate_fwhm(surface='IS', xy_data=xy_data_slicer, PSF_window=1500,
+                                                           N_points=N_points, spaxel_scale=spaxel_scale, wavelength=wavelength)
+        time_fwhm_slicer = time() - start
+        start = time()
+        fwhm_x_det, fwhm_y_det = self.calculate_fwhm(surface='DET', xy_data=xy_data_detector, PSF_window=PSF_window,
+                                                     N_points=N_points, spaxel_scale=spaxel_scale, wavelength=wavelength)
+        time_fwhm_det = time() - start
+        # print("FWHM time: %.3f sec for Image Slicer | %.3f sec for Detector" % (time_fwhm_slicer, time_fwhm_det))
+
+
+        # print("\nWave #%d, config #%d" % (wave_idx, config))
+        # print("Fx: %.4f Fy: %.4f" % (fx, fy))
+        # print("Hx: %.4f Hy: %.4f" % (hx, hy))
+        #
+        if config == 1:
+            print("FWHM in X [Detector]: %.1f microns | in Y [Image Slicer]: %.2f microns " % (fwhm_x_det, fwhm_y_slicer))
+
+        FWHM[:] = [fwhm_x_det, fwhm_y_slicer]        # Store the results
 
         plt.show()
 
@@ -2139,7 +2163,7 @@ class FWHM_PSF_Analysis(AnalysisGeneric):
 
 
     def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
-                        configuration_idx=None, surface=None, N_rays=500, N_points=150, PSF_window=150):
+                        configuration_idx=None, surface=None, N_rays=500, N_points=50, PSF_window=50):
         """
         Loop over the Zemax files and calculate the FWHM
 
@@ -2164,7 +2188,7 @@ class FWHM_PSF_Analysis(AnalysisGeneric):
         # We want the result to produce as output: the RMS WFE array, and the RayTrace at both Object and Focal plane
         results_names = ['GEO_FWHM', 'PSF_CUBE', 'OBJ_XY', 'FOC_XY']
         # we need to give the shapes of each array to self.run_analysis
-        results_shapes = [(3,), (PSF_window//15, PSF_window//15), (2,), (2,)]
+        results_shapes = [(2,), (PSF_window//15, PSF_window//15), (2,), (2,)]
 
         px, py = define_pupil_sampling(r_obsc=0.2841, N_rays=N_rays, mode='random')
         print("Using %d rays" % N_rays)
@@ -2196,8 +2220,8 @@ class FWHM_PSF_Analysis(AnalysisGeneric):
                                              files_dir=files_dir, zemax_file=zemax_file, results_path=results_path,
                                              results_shapes=results_shapes, results_names=results_names,
                                              wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
-                                             surface=surface, px=px, py=py, spaxel_scale=spaxel_scale,
-                                             N_points=N_points, PSF_window=PSF_window)
+                                             surface=surface, slicer_surface=slicer_surface, px=px, py=py,
+                                             spaxel_scale=spaxel_scale, N_points=N_points, PSF_window=PSF_window)
             results.append(list_results)
 
 
