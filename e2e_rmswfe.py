@@ -122,6 +122,43 @@ def detector_rms_wfe(zosapi, sys_mode, ao_modes, spaxel_scale, spaxels_per_slice
             fig.savefig(os.path.join(save_path, fig_name))
 
 
+    # Object space coordinates
+    fig_obj, axes = plt.subplots(2, 2, figsize=(10, 10))
+
+    for i in range(2):
+        for j in range(2):
+            k = 2 * i + j
+            ifu_section = ifu_sections[k]
+            ax = axes[i][j]
+            _obj_xy = object_coord[k]
+            _rms_field = rms_maps[k]
+            N_waves = _rms_field.shape[0]
+            k_wave = int(N_waves//2)
+
+            x_obj, y_obj = _obj_xy[k_wave, :, :, 0].flatten(), _obj_xy[k_wave, :, :, 1].flatten()
+            triang = tri.Triangulation(x_obj, y_obj)
+            tpc = ax.tripcolor(triang, _rms_field[k_wave, :].flatten(), shading='flat', cmap='jet')
+            tpc.set_clim(vmin=min_rms, vmax=max_rms)
+
+            axis_label = 'Object'
+            ax.set_xlabel(axis_label + r' X [mm]')
+            ax.set_ylabel(axis_label + r' Y [mm]')
+            ax.set_aspect('equal')
+            cbar = plt.colorbar(tpc, ax=ax, orientation='horizontal')
+            cbar.ax.set_xlabel('[nm]')
+
+            wave = waves[k_wave]
+
+            title = r'IFU-%s | %s mas | %s SPEC %.3f $\mu$m | %s' % (ifu_section, spaxel_scale, grating, wave, sys_mode)
+            ax.set_title(title)
+            fig_name = "OBJ_RMSMAP_%s_DETECTOR_SPEC_%s_MODE_%s" % (spaxel_scale, grating, sys_mode)
+
+            save_path = os.path.join(results_path, analysis_dir)
+            if os.path.isfile(os.path.join(save_path, fig_name)):
+                os.remove(os.path.join(save_path, fig_name))
+            fig_obj.savefig(os.path.join(save_path, fig_name))
+
+
     return rms_field
 
 
