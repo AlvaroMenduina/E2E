@@ -21,6 +21,9 @@ from matplotlib.patches import Rectangle
 import pandas as pd
 import seaborn as sns
 
+# Max Y: 30.72
+# Max X: 62.94
+
 def draw_detector_boundary(ax):
     det_pix = 15e-3  # detector pixel in mm
     width = 2 * 4096 * det_pix + 3
@@ -56,6 +59,10 @@ def detector_rms_wfe(zosapi, sys_mode, ao_modes, spaxel_scale, spaxels_per_slice
                                                 surface=None, spaxels_per_slice=spaxels_per_slice)
         # Only 1 list, no Monte Carlo
         rms_wfe, obj_xy, foc_xy, global_xy, waves = list_results[0]
+
+        # print a summary:
+        print("\nFor %s scale, IFU-%s, SPEC-%s: " % (spaxel_scale, ifu_section, grating))
+        print("RMS: min %.2f | mean %.2f | max %.2f nm " % (np.min(rms_wfe), np.mean(rms_wfe), np.max(rms_wfe)))
 
         rms_maps.append(rms_wfe)
         focal_coord.append(foc_xy)
@@ -126,14 +133,14 @@ if __name__ == """__main__""":
     # Create a Python Standalone Application
     psa = e2e.PythonStandaloneApplication()
 
-    files_path = os.path.abspath("D:\End to End Model\June_2020")
-    results_path = os.path.abspath("D:\End to End Model\Results_June")
+    files_path = os.path.abspath("D:\End to End Model\June_John2020")
+    results_path = os.path.abspath("D:\End to End Model\Results_JuneJohn")
 
     sys_mode = 'HARMONI'
     ao_modes = ['NOAO']
-    spaxel_scale = '60x30'
-    gratings = ['Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
-    # gratings = ['VIS']
+    spaxel_scale = '4x4'
+    gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
+    # gratings = ['J']
     analysis_dir = os.path.join(results_path, 'RMS_WFE')
 
     rms_grating = []
@@ -150,7 +157,7 @@ if __name__ == """__main__""":
     sns.boxplot(data=data, ax=ax, hue_order=gratings, palette=sns.color_palette("Reds"))
     ax.set_ylabel(r'RMS WFE [nm]')
     ax.set_title(r'RMS WFE Detector | %s scale | %s' % (spaxel_scale, sys_mode))
-    ax.set_ylim([0, 500])
+    # ax.set_ylim([0, 500])
 
     fig_name = "RMS_WFE_DETECTOR_%s_%s" % (spaxel_scale, sys_mode)
     if os.path.isfile(os.path.join(analysis_dir, fig_name)):

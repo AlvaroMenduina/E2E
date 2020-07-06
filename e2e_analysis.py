@@ -2436,15 +2436,48 @@ class RMS_WFE_Analysis(AnalysisGeneric):
         raytrace = system.Tools.OpenBatchRayTrace()
         normUnPolData = raytrace.CreateNormUnpol(spaxels_per_slice, constants.RaysType_Real, surface)
 
+        theMFE = system.MFE
+        nops = theMFE.NumberOfOperands
+        theMFE.RemoveOperandsAt(1, nops)
+        # build merit function
+        op = theMFE.GetOperandAt(1)
+        op.ChangeType(constants.MeritOperandType_CONF)
+        op.GetOperandCell(constants.MeritColumn_Param1).Value = config
+
+        # Pupil Sampling
+        samp = 4
+        wfe_op = constants.MeritOperandType_RWRE
+
         # Loop over all Spaxels in the Slice
         for i, (h_x, h_y) in enumerate(zip(hx, hy)):
 
-            operand = constants.MeritOperandType_RWCE
-            rms = system.MFE.GetOperandValue(operand, surface, wave_idx, h_x, h_y, 0.0, 0.0, 0.0, 0.0)
-            RMS_WFE[i] = wavelength * 1e3 * rms         # We assume the Wavelength comes in Microns
+            # operand = constants.MeritOperandType_RWRE
+            # rms = system.MFE.GetOperandValue(operand, surface, wave_idx, h_x, h_y, 0.0, 0.0, 0.0, 0.0)
+            # RMS_WFE[i] = wavelength * 1e3 * rms         # We assume the Wavelength comes in Microns
+
+            op = theMFE.AddOperand()
+            op.ChangeType(wfe_op)
+            op.GetOperandCell(constants.MeritColumn_Param1).Value = int(samp)
+            op.GetOperandCell(constants.MeritColumn_Param2).Value = int(wave_idx)
+            op.GetOperandCell(constants.MeritColumn_Param3).Value = float(h_x)
+            op.GetOperandCell(constants.MeritColumn_Param4).Value = float(h_y)
+            op.GetOperandCell(constants.MeritColumn_Weight).Value = 0
 
             # Add the ray to the RayTrace
             normUnPolData.AddRay(wave_idx, h_x, h_y, 0, 0, constants.OPDMode_None)
+
+        # update merit function
+        theMFE.CalculateMeritFunction()
+        # retrieve value of each RWRE operand
+        # theMCE.SetCurrentConfiguration(i)
+        system.MCE.SetCurrentConfiguration(config)
+        # print("N operands:", nops)
+        for irow in range(2, theMFE.NumberOfOperands + 1):
+            op = theMFE.GetOperandAt(irow)
+            rms = op.Value
+            # print(irow)
+            # print("RMS: %.2f nm" % (wavelength * 1e3 * rms))
+            RMS_WFE[irow - 2] = wavelength * 1e3 * rms  # We assume the Wavelength comes in Microns
 
         # Run the RayTrace for the whole Slice
         CastTo(raytrace, 'ISystemTool').RunAndWaitForCompletion()
@@ -2475,6 +2508,11 @@ class RMS_WFE_Analysis(AnalysisGeneric):
             #     print("hx: %.5f hy: %.5f" % (hx[i], hy[i]))
             #     x_det, y_det = output[4], output[5]
             #     print("x_det: %.3f y_det: %.3f" % (x_det, y_det))
+            #
+            #     # Add the local coordinates despite the vignetting
+            #     local_xyz[i, 0] = output[4]
+            #     local_xyz[i, 1] = output[5]
+            #     local_xyz[i, 2] = output[6]
 
 
         normUnPolData.ClearData()
