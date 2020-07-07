@@ -2504,7 +2504,7 @@ class RMS_WFE_Analysis(AnalysisGeneric):
             #     surf_name = system.LDE.GetSurfaceAt(vignetting).Comment
             #     print("\nWARNING: Vignetting at Surface #%d, Name %s" % (vignetting, surf_name))
             #     print("Wavelength: %.3f | Configuration #%d" % (wavelength, config))
-            #     print("fx: %.5f fy: %.5f" % (X_MAX * hx[i], Y_MAX * hy[i]))
+            #     print("Field #%d | fx: %.5f fy: %.5f" % (i + 1, X_MAX * hx[i], Y_MAX * hy[i]))
             #     print("hx: %.5f hy: %.5f" % (hx[i], hy[i]))
             #     x_det, y_det = output[4], output[5]
             #     print("x_det: %.3f y_det: %.3f" % (x_det, y_det))
