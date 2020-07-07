@@ -2613,6 +2613,337 @@ spaxel_sizes["4x4"] = {"FPRS": [13.021, 13.021],
                             "IFU": [65, 130],
                             "SPEC": [15, 30]}
 
+
+class AnalysisFast(object):
+    """
+    Faster version that doesn't look over the wavelengths
+    """
+
+    def __init__(self, zosapi, *args, **kwargs):
+        """
+        We basically need a ZOS API Standalone Application to
+        open and close the files we want to analyze
+        :param zosapi:
+        :param args:
+        :param kwargs:
+        """
+
+        self.zosapi = zosapi
+
+    def run_analysis(self, analysis_function, results_shapes, results_names, files_dir, zemax_file, results_path,
+                     wavelength_idx=None, configuration_idx=None, surface=None,
+                     *args, **kwargs):
+
+        # check that the file name is correct and the zemax file exists
+        if os.path.exists(os.path.join(files_dir, zemax_file)) is False:
+            raise FileExistsError("%s does NOT exist" % zemax_file)
+
+        print("\nOpening Zemax File: ", zemax_file)
+        self.zosapi.OpenFile(os.path.join(files_dir, zemax_file), False)
+        file_name = zemax_file.split(".")[0]  # Remove the ".zmx" suffix
+
+        # Check if the results directory already exists
+        results_dir = os.path.join(results_path, file_name)
+        print("Results will be saved in: ", results_dir)
+        if not os.path.exists(results_dir):
+            os.mkdir(results_dir)  # If not, create the directory to store results
+
+        # Get some info on the system
+        system = self.zosapi.TheSystem  # The Optical System
+        MCE = system.MCE  # Multi Configuration Editor
+        LDE = system.LDE  # Lens Data Editor
+        N_surfaces = LDE.NumberOfSurfaces
+        N_configs = MCE.NumberOfConfigurations
+
+        # print("\nSystem Data:")
+        print("Number of Surfaces: ", N_surfaces)
+        # print("Number of Configurations / Slices: ", N_configs)
+        _wavelengths = get_wavelengths(system, info=False)
+        N_waves = _wavelengths.shape[0]
+        # field_points = get_fields(system, info=False)
+
+        # Let's deal with the data format
+        if wavelength_idx is None:  # We use all the available wavelengths
+            wavelengths = _wavelengths
+            wavelength_idx = np.arange(1, N_waves + 1)
+        else:  # We have received a list of wavelength indices
+            wavelengths = [_wavelengths[idx - 1] for idx in wavelength_idx]
+            N_waves = len(wavelength_idx)
+
+        if configuration_idx is None:
+            configurations = np.arange(1, N_configs + 1)
+        else:  # We have received a list of configurations
+            configurations = configuration_idx
+            N_configs = len(configuration_idx)
+        N_slices = N_configs
+
+        if surface is None:  # we go to the final image plane
+            surface = system.LDE.NumberOfSurfaces - 1
+
+        N_surfaces = system.LDE.NumberOfSurfaces
+        if surface != (N_surfaces - 1):
+            # The Surface is not the final Image Plane. We must force Zemax to IGNORE
+            # all surfaces after our surface of interest so that the RWCE operands works
+            surfaces_to_ignore = np.arange(surface + 1, N_surfaces)
+            for surf_number in surfaces_to_ignore:
+                _surf = system.LDE.GetSurfaceAt(surf_number)
+                _surf.TypeData.IgnoreSurface = True
+
+            last_surface = system.LDE.GetSurfaceAt(surface)
+            thickness = last_surface.Thickness
+            print("Thickness: ", last_surface.Thickness)
+            # image = system.LDE.GetSurfaceAt(N_surfaces - 1)
+            # print("\nImage Name: ", image.Comment)
+
+            # Temporarily set the Thickness to 0
+            last_surface.Thickness = 0.0
+            print("Thickness: ", last_surface.Thickness)
+
+        # Double check we are using the right surface
+        print("\nSurface Name: ", system.LDE.GetSurfaceAt(surface).Comment)
+
+        # Customize the initilization of the results array so that we can vary the shapes
+        # some analysis may be [spaxels_per_slice, N_slices, N_waves] such as an RMS WFE map
+        # others might be [N_fields, N_rays, N_slices, N_waves] such as a Spot Diagram
+
+        # print("\nDynamically creating Global Variables to store results")
+        for _name, _shape in zip(results_names, results_shapes):
+            # print("Variable: %s with shape (N_waves, N_configs) + " % _name, _shape)
+            globals()[_name] = np.empty((N_slices, ) + _shape)
+            # print(globals()[_name].shape)
+
+        # print("\nApplying 'analysis_function': ", analysis_function.__name__)
+        print("At Surface #%d | Image Plane is #%d" % (surface, N_surfaces - 1))
+        print("For Wavelength Numbers: ", wavelength_idx)
+        print("For Configurations %d -> %d" % (configurations[0], configurations[-1]))
+
+        start = time()
+        print("\nAnalysis Started: [FAST MODE]")
+        for j, config in enumerate(configurations):
+
+            # print("Config #%d: " % (config))
+
+            # Here is where the arbitrary "analysis_function" will be called for each Wavelength and Configuration
+            results = analysis_function(system=system, wavelength_idx=wavelength_idx, config=config, surface=surface,
+                                        *args, **kwargs)
+
+            # Store the result values in the arrays:
+            for _name, res in zip(results_names, results):
+                globals()[_name][j] = res
+
+        # Unignore the surfaces
+        if surface != (N_surfaces - 1):
+            last_surface = system.LDE.GetSurfaceAt(surface)
+            last_surface.Thickness = thickness
+            for surf_number in surfaces_to_ignore:
+                _surf = system.LDE.GetSurfaceAt(surf_number)
+                _surf.TypeData.IgnoreSurface = False
+
+        self.zosapi.CloseFile(save=False)
+        analysis_time = time() - start
+        print("\nAnalysis done in %.1f seconds" % analysis_time)
+        time_per_wave = analysis_time / len(wavelengths)
+        print("%.2f seconds per Wavelength" % time_per_wave)
+
+        # local_keys = [key for key in globals().keys()]
+        # print(local_keys)
+
+        # We return a list containing the results, and the value of the wavelengths
+        list_results = [globals()[_name] for _name in results_names]
+        list_results.append(wavelengths)
+
+        return list_results
+
+
+class RMS_WFE_FastAnalysis(AnalysisFast):
+    """
+    Ex
+    """
+
+    @staticmethod
+    def analysis_function_rms_wfe(system, wavelength_idx, config, spaxels_per_slice, surface):
+        """
+
+        """
+        start0 = time()
+
+        # Set Current Configuration
+        system.MCE.SetCurrentConfiguration(config)
+
+        # Get the Field Points for that configuration
+        sysField = system.SystemData.Fields
+        N_fields = sysField.NumberOfFields
+        N_waves = len(wavelength_idx)
+        N_rays = N_waves * spaxels_per_slice
+
+        fx_min, fy_min = sysField.GetField(1).X, sysField.GetField(1).Y
+        fx_max, fy_max = sysField.GetField(N_fields).X, sysField.GetField(N_fields).Y
+
+        X_MAX = np.max([np.abs(sysField.GetField(i + 1).X) for i in range(N_fields)])
+        Y_MAX = np.max([np.abs(sysField.GetField(i + 1).Y) for i in range(N_fields)])
+
+        # Normalized field coordinates (hx, hy)
+        hx_min, hx_max = fx_min / X_MAX, fx_max / X_MAX
+        hy_min, hy_max = fy_min / Y_MAX, fy_max / Y_MAX
+
+        hx = np.linspace(hx_min, hx_max, spaxels_per_slice)
+        hy = np.linspace(hy_min, hy_max, spaxels_per_slice)
+
+        # The Field coordinates for the Object
+        obj_xy = np.array([X_MAX * hx, Y_MAX * hy]).T
+        RMS_WFE = np.empty((N_waves, spaxels_per_slice))
+        foc_xy = np.empty((N_waves, spaxels_per_slice, 2))
+
+        raytrace = system.Tools.OpenBatchRayTrace()
+        normUnPolData = raytrace.CreateNormUnpol(N_rays, constants.RaysType_Real, surface)
+
+        # Start creating the Merit Function
+        theMFE = system.MFE
+
+        # Clear any operands left
+        nops = theMFE.NumberOfOperands
+        theMFE.RemoveOperandsAt(1, nops)
+
+        # Build merit function
+        # Set first operand to current configuration
+        op = theMFE.GetOperandAt(1)
+        op.ChangeType(constants.MeritOperandType_CONF)
+        op.GetOperandCell(constants.MeritColumn_Param1).Value = config
+
+        # Pupil Sampling
+        samp = 4
+        wfe_op = constants.MeritOperandType_RWRE
+
+        # Loop over the wavelengths
+        for i_wave, wave_idx in enumerate(wavelength_idx):
+
+            # Loop over all Spaxels in the Slice
+            for j_field, (h_x, h_y) in enumerate(zip(hx, hy)):
+
+                op = theMFE.AddOperand()
+                op.ChangeType(wfe_op)
+                op.GetOperandCell(constants.MeritColumn_Param1).Value = int(samp)
+                op.GetOperandCell(constants.MeritColumn_Param2).Value = int(wave_idx)
+                op.GetOperandCell(constants.MeritColumn_Param3).Value = float(h_x)
+                op.GetOperandCell(constants.MeritColumn_Param4).Value = float(h_y)
+                op.GetOperandCell(constants.MeritColumn_Weight).Value = 0
+
+                # Add the ray to the RayTrace
+                normUnPolData.AddRay(wave_idx, h_x, h_y, 0, 0, constants.OPDMode_None)
+
+        # time_1 = time() - start0
+        # print("\nTime spent setting up MF and Raytrace: %.3f sec" % time_1)
+        # start = time()
+
+        # update merit function
+        theMFE.CalculateMeritFunction()
+        # time_mf = time() - start
+        # print("Time spent updating MF: %.3f sec" % time_mf)
+
+        # start = time()
+        # Run the RayTrace for the whole Slice
+        CastTo(raytrace, 'ISystemTool').RunAndWaitForCompletion()
+        # time_ray = time() - start
+        # print("Time spent running Raytrace: %.3f sec" % time_ray)
+
+        # start = time()
+        normUnPolData.StartReadingResults()
+
+        # Retrieve the results for the operands and raytrace
+        # Loop over the wavelengths
+        for i_wave, wave_idx in enumerate(wavelength_idx):
+            # Loop over all Spaxels in the Slice
+            for j_field, (h_x, h_y) in enumerate(zip(hx, hy)):
+
+                irow = 2 + i_wave * N_fields + j_field
+
+                op = theMFE.GetOperandAt(irow)
+
+                # print(op.GetOperandCell(constants.MeritColumn_Param1).Value)
+                # print(op.GetOperandCell(constants.MeritColumn_Param2).Value)
+                # print(op.GetOperandCell(constants.MeritColumn_Param3).Value)
+                rms = op.Value
+                wavelength = system.SystemData.Wavelengths.GetWavelength(wave_idx).Wavelength
+
+                RMS_WFE[i_wave, j_field] = wavelength * 1e3 * rms  # We assume the Wavelength comes in Microns
+                # print("Row #%d: Wave %.3f micron | Field #%d -> RMS %.3f" % (irow, wavelength, j_field + 1, rms))
+
+                output = normUnPolData.ReadNextResult()
+                if output[2] == 0:
+                    x, y = output[4], output[5]
+                    foc_xy[i_wave, j_field, 0] = x
+                    foc_xy[i_wave, j_field, 1] = y
+
+        normUnPolData.ClearData()
+        CastTo(raytrace, 'ISystemTool').Close()
+        # time_res = time() - start
+        # print("Time spent reading results: %.3f sec" % time_res)
+
+        # time_total = time() - start0
+        # print("TOTAL Time: %.3f sec" % time_total)
+        # sec_per_wave = time_total / N_waves * 1000
+        # print("%3.f millisec per Wavelength" % sec_per_wave)
+        #
+        #
+        # plt.scatter(foc_xy[:, :, 0].flatten(), foc_xy[:, :, 1].flatten(), s=2, color='black')
+
+        return [RMS_WFE, obj_xy, foc_xy]
+
+    # The following functions depend on how you want to post-process your analysis results
+    # For example, "loop_over_files" automatically runs the RMS WFE analysis across all Zemax files
+    # and uses "flip_rms" to reorder the Configurations -> Slice #,
+    # and "plot_RMS_WFE_maps" to save the figures
+
+    def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
+                        configuration_idx=None, surface=None, spaxels_per_slice=51):
+        """
+        Function that loops over a given set of E2E model Zemax files, running the analysis
+        defined by self.analysis_function_rms_wfe
+
+
+        :param files_dir: path where the E2E model files are stored
+        :param files_opt: dictionary containing the info to create the list of zemax files we want to analyse
+        :param results_path: path where we want to store the results
+        :param wavelength_idx: list containing the Wavelength numbers we want to analyze. If None, we will use All
+        :param configuration_idx: list containing the Configurations we want to analyze. If None, we will use All
+        :param surface: Zemax Surface number at which the analysis will be computed
+        :param spaxels_per_slice: number spaxels to sample each slice with
+        :return:
+        """
+
+        # We want the result to produce as output: the RMS WFE array, and the RayTrace at both Object and Focal plane
+        results_names = ['RMS_WFE', 'OBJ_XY', 'FOC_XY']
+        N_waves = 23 if wavelength_idx is None else len(wavelength_idx)
+        # we need to give the shapes of each array to self.run_analysis
+        results_shapes = [(N_waves, spaxels_per_slice,), (N_waves, spaxels_per_slice, 2), (N_waves, spaxels_per_slice, 2)]
+
+        metadata = {}
+        metadata['Spaxels per slice'] = spaxels_per_slice
+        metadata['Configurations'] = 'All' if configuration_idx is None else configuration_idx
+        metadata['Wavelengths'] = 'All' if wavelength_idx is None else wavelength_idx
+
+
+        # read the file options
+        file_list, sett_list = create_zemax_file_list(which_system=files_opt['which_system'],
+                                                      AO_modes=files_opt['AO_modes'], scales=files_opt['scales'],
+                                                      IFUs=files_opt['IFUs'], grating=files_opt['grating'])
+
+        # Loop over the Zemax files
+        results = []
+        for zemax_file, settings in zip(file_list, sett_list):
+
+            list_results = self.run_analysis(analysis_function=self.analysis_function_rms_wfe,
+                                             files_dir=files_dir, zemax_file=zemax_file, results_path=results_path,
+                                             results_shapes=results_shapes, results_names=results_names,
+                                             wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
+                                             surface=surface, spaxels_per_slice=spaxels_per_slice)
+
+            results.append(list_results)
+            rms_wfe, obj_xy, foc_xy, wavelengths = list_results
+
+        return results
+
+
 if __name__ == """__main__""":
 
     pass
