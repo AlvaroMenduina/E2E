@@ -158,7 +158,6 @@ def detector_rms_wfe(zosapi, sys_mode, ao_modes, spaxel_scale, spaxels_per_slice
                 os.remove(os.path.join(save_path, fig_name))
             fig_obj.savefig(os.path.join(save_path, fig_name))
 
-
     return rms_field
 
 
