@@ -2761,7 +2761,7 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
     """
 
     @staticmethod
-    def analysis_function_rms_wfe(system, wavelength_idx, config, spaxels_per_slice, surface):
+    def analysis_function_rms_wfe(system, wavelength_idx, config, spaxels_per_slice, surface, pupil_sampling):
         """
 
         """
@@ -2811,7 +2811,7 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
         op.GetOperandCell(constants.MeritColumn_Param1).Value = config
 
         # Pupil Sampling
-        samp = 4
+        samp = pupil_sampling
         wfe_op = constants.MeritOperandType_RWRE
 
         # Loop over the wavelengths
@@ -2895,7 +2895,7 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
     # and "plot_RMS_WFE_maps" to save the figures
 
     def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
-                        configuration_idx=None, surface=None, spaxels_per_slice=51):
+                        configuration_idx=None, surface=None, spaxels_per_slice=3, pupil_sampling=4):
         """
         Function that loops over a given set of E2E model Zemax files, running the analysis
         defined by self.analysis_function_rms_wfe
@@ -2936,10 +2936,11 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
                                              files_dir=files_dir, zemax_file=zemax_file, results_path=results_path,
                                              results_shapes=results_shapes, results_names=results_names,
                                              wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
-                                             surface=surface, spaxels_per_slice=spaxels_per_slice)
+                                             surface=surface, spaxels_per_slice=spaxels_per_slice,
+                                             pupil_sampling=pupil_sampling)
 
             results.append(list_results)
-            rms_wfe, obj_xy, foc_xy, wavelengths = list_results
+
 
         return results
 

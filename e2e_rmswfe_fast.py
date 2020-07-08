@@ -17,7 +17,7 @@ we loop through each configuration and generate a single instance
 of the Merit Function and the Raytrace for all wavelengths
 
 With this approach we can calculate the RMS WFE for all 76 configs X 23 wavelengths X 3 Field points
-for a given IFU channel in 1 - 1.5 minutes
+for a given IFU channel in 1 - 1.5 minutes (assuming a pupil sampling N=4, see Zemax Operand RWRE for details)
 
 
 """
@@ -30,6 +30,89 @@ import matplotlib.tri as tri
 from matplotlib.patches import Rectangle
 import pandas as pd
 import seaborn as sns
+from time import time
+
+def pupil_sampling_effect(zosapi, sys_mode, ao_modes, spaxel_scale, spaxels_per_slice, grating,
+                          files_path, results_path):
+    """
+    Function to demonstrate the effect of Pupil Sampling
+    as defined in the RWRE operand: N is the number of points in a N x N grid
+    for each quadrant of the pupil
+
+    Increasing the pupil sampling makes the RMS WFE results more robust
+    but it also slows down the calculation
+
+    :param zosapi:
+    :param sys_mode:
+    :param ao_modes:
+    :param spaxel_scale:
+    :param spaxels_per_slice:
+    :param grating:
+    :param files_path:
+    :param results_path:
+    :return:
+    """
+
+    analysis_dir = os.path.join(results_path, 'RMS_WFE')
+    print("Analysis Results will be saved in folder: ", analysis_dir)
+    if not os.path.exists(analysis_dir):
+        os.mkdir(analysis_dir)
+
+    analysis = e2e.RMS_WFE_FastAnalysis(zosapi=zosapi)
+
+    options = {'which_system': sys_mode, 'AO_modes': ao_modes, 'scales': [spaxel_scale],
+               'IFUs': ['AB'], 'grating': [grating]}
+
+    N_samp = np.arange(4, 42, 2)
+    times = []
+    min_rms, mean_rms, max_rms = [], [], []
+    rms0 = []
+
+    for pupil_samp in N_samp:
+
+        start = time()
+        list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options, results_path=results_path,
+                                                wavelength_idx=None, configuration_idx=[1, 2],
+                                                surface=None, spaxels_per_slice=spaxels_per_slice,
+                                                pupil_sampling=pupil_samp)
+        speed = time() - start
+        times.append(speed)
+        rms_wfe, obj_xy, foc_xy, waves = list_results[0]
+        mean_rms.append(np.mean(rms_wfe))
+        min_rms.append(np.min(rms_wfe))
+        max_rms.append(np.max(rms_wfe))
+        rms0.append(rms_wfe[0, 0, 2])
+
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
+    # ax.plot(N_samp, times)
+    # ax.plot(N_samp, min_rms)
+    ax1.plot(N_samp, mean_rms)
+    ax1.set_xlabel(r'Pupil Sampling $N$')
+    ax1.set_ylabel(r'RMS WFE [nm]')
+    ax1.set_title(r'Mean RMS')
+    ax1.grid(True)
+
+    m0 = np.mean(mean_rms)
+    deltas = (np.array(mean_rms) - m0) / m0 * 100
+    ax2.plot(N_samp, deltas)
+    ax2.set_xlabel(r'Pupil Sampling $N$')
+    ax2.set_ylabel(r'Per cent')
+    ax2.set_title(r'Per cent change wrt average')
+    ax2.grid(True)
+
+    ax3.plot(N_samp, times)
+    ax3.set_xlabel(r'Pupil Sampling $N$')
+    ax3.set_ylabel(r'Time [sec]')
+    ax3.set_title(r'Computational time')
+    ax3.grid(True)
+
+    # fig, ax = plt.subplots(1, 1)
+    # ax.plot(N_samp, times)
+    # ax.plot(N_samp, min_rms)
+
+    plt.show()
+
+    return
 
 def draw_detector_boundary(ax):
     det_pix = 15e-3  # detector pixel in mm
@@ -44,7 +127,8 @@ def draw_detector_boundary(ax):
     return
 
 
-def detector_rms_wfe(zosapi, sys_mode, ao_modes, spaxel_scale, spaxels_per_slice, grating, files_path, results_path):
+def detector_rms_wfe(zosapi, sys_mode, ao_modes, spaxel_scale, spaxels_per_slice, grating, pupil_sampling,
+                     files_path, results_path):
 
 
     analysis_dir = os.path.join(results_path, 'RMS_WFE')
@@ -64,7 +148,8 @@ def detector_rms_wfe(zosapi, sys_mode, ao_modes, spaxel_scale, spaxels_per_slice
 
         list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options, results_path=results_path,
                                                 wavelength_idx=None, configuration_idx=None,
-                                                surface=None, spaxels_per_slice=spaxels_per_slice)
+                                                surface=None, spaxels_per_slice=spaxels_per_slice,
+                                                pupil_sampling=pupil_sampling)
         # Only 1 list, no Monte Carlo
         rms_wfe, obj_xy, foc_xy, waves = list_results[0]
 
@@ -118,7 +203,7 @@ def detector_rms_wfe(zosapi, sys_mode, ao_modes, spaxel_scale, spaxels_per_slice
             cbar.ax.set_xlabel('[nm]')
             title = r'IFU-%s | %s mas | %s SPEC | %s' % (ifu_section, spaxel_scale, grating, sys_mode)
             ax.set_title(title)
-            fig_name = "RMSMAP_%s_DETECTOR_SPEC_%s_MODE_%s" % (spaxel_scale, grating, sys_mode)
+            fig_name = "FASTEST_RMSMAP_%s_DETECTOR_SPEC_%s_MODE_%s" % (spaxel_scale, grating, sys_mode)
 
             save_path = os.path.join(results_path, analysis_dir)
             if os.path.isfile(os.path.join(save_path, fig_name)):
@@ -136,20 +221,26 @@ if __name__ == """__main__""":
     # Create a Python Standalone Application
     psa = e2e.PythonStandaloneApplication()
 
-    files_path = os.path.abspath("D:\End to End Model\June_John2020")
-    results_path = os.path.abspath("D:\End to End Model\Results_JuneJohnFast")
+    # files_path = os.path.abspath("D:\End to End Model\June_John2020")
+    files_path = os.path.abspath("D:\End to End Model\Monte_Carlo\MedianInstance")
+    results_path = os.path.abspath("D:\End to End Model\Monte_Carlo\MedianInstance")
 
     sys_mode = 'HARMONI'
     ao_modes = ['NOAO']
     spaxel_scale = '60x30'
-    gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
-    # gratings = ['J']
+    # gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
+    gratings = ['H']
     analysis_dir = os.path.join(results_path, 'RMS_WFE')
+
+    # # First we want to justify the choice of Pupil Sampling
+    # pupil_sampling_effect(zosapi=psa, sys_mode=sys_mode, ao_modes=ao_modes, spaxel_scale=spaxel_scale,
+    #                            spaxels_per_slice=3, grating='VIS', files_path=files_path, results_path=results_path)
 
     rms_grating = []
     for grating in gratings:
         rms = detector_rms_wfe(zosapi=psa, sys_mode=sys_mode, ao_modes=ao_modes, spaxel_scale=spaxel_scale,
-                               spaxels_per_slice=3, grating=grating, files_path=files_path, results_path=results_path)
+                               spaxels_per_slice=3, grating=grating, pupil_sampling=10,
+                               files_path=files_path, results_path=results_path)
         rms_grating.append(rms.flatten())
 
     rms_grating = np.array(rms_grating).T
