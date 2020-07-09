@@ -32,6 +32,7 @@ import pandas as pd
 import seaborn as sns
 from time import time
 
+
 def pupil_sampling_effect(zosapi, sys_mode, ao_modes, spaxel_scale, spaxels_per_slice, grating,
                           files_path, results_path):
     """
@@ -228,7 +229,7 @@ if __name__ == """__main__""":
     sys_mode = 'HARMONI'
     ao_modes = ['NOAO']
     spaxel_scale = '60x30'
-    # gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
+    # gratings = ['Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
     gratings = ['H']
     analysis_dir = os.path.join(results_path, 'RMS_WFE')
 
@@ -239,7 +240,7 @@ if __name__ == """__main__""":
     rms_grating = []
     for grating in gratings:
         rms = detector_rms_wfe(zosapi=psa, sys_mode=sys_mode, ao_modes=ao_modes, spaxel_scale=spaxel_scale,
-                               spaxels_per_slice=3, grating=grating, pupil_sampling=10,
+                               spaxels_per_slice=3, grating=grating, pupil_sampling=4,
                                files_path=files_path, results_path=results_path)
         rms_grating.append(rms.flatten())
 
