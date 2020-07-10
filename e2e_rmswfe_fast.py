@@ -222,15 +222,15 @@ if __name__ == """__main__""":
     # Create a Python Standalone Application
     psa = e2e.PythonStandaloneApplication()
 
-    # files_path = os.path.abspath("D:\End to End Model\June_John2020")
-    files_path = os.path.abspath("D:\End to End Model\Monte_Carlo\MedianInstance")
-    results_path = os.path.abspath("D:\End to End Model\Monte_Carlo\MedianInstance")
+    files_path = os.path.abspath("D:\End to End Model\June_John2020")
+    # files_path = os.path.abspath("D:\End to End Model\Monte_Carlo\MedianInstance")
+    results_path = os.path.abspath("D:\End to End Model\Results_JuneJohn")
 
     sys_mode = 'HARMONI'
     ao_modes = ['NOAO']
-    spaxel_scale = '60x30'
-    # gratings = ['Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
-    gratings = ['H']
+    spaxel_scale = '10x10'
+    gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
+    # gratings = ['H']
     analysis_dir = os.path.join(results_path, 'RMS_WFE')
 
     # # First we want to justify the choice of Pupil Sampling

@@ -24,7 +24,7 @@ import e2e_analysis as e2e
 import matplotlib.pyplot as plt
 import matplotlib.tri as tri
 
-def detector_ensquared_energy(zosapi, sys_mode, ao_modes, spaxel_scale, grating, N_rays, files_path, results_path):
+def detector_ensquared_energy(zosapi, sys_mode, ao_modes, spaxel_scale, grating, N_rays, alpha, files_path, results_path):
     """
     Calculate the Ensquared Energy at the detector plane for all 4 IFU channels
     The Ensquared Energy is calculated for the Field Point at the centre of the slice
@@ -56,7 +56,8 @@ def detector_ensquared_energy(zosapi, sys_mode, ao_modes, spaxel_scale, grating,
         options = {'which_system': sys_mode, 'AO_modes': ao_modes, 'scales': [spaxel_scale], 'IFUs': [ifu],
                    'grating': [grating]}
         list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options, results_path=results_path,
-                                                wavelength_idx=waves, configuration_idx=None, N_rays=N_rays)
+                                                wavelength_idx=waves, configuration_idx=None, N_rays=N_rays,
+                                                alpha=alpha)
 
         # No Monte Carlo so the list_results only contains 1 entry, for the IFU channel
         energy, obj_xy, slicer_xy, detector_xy, wavelengths = list_results[0]
@@ -178,19 +179,24 @@ if __name__ == """__main__""":
     psa = e2e.PythonStandaloneApplication()
 
     # Don't forget to specify where to find the E2E files and where to save results
-    files_path = os.path.abspath("D:\End to End Model\June_2020")
-    results_path = os.path.abspath("D:\End to End Model\Results_June")
+    # files_path = os.path.abspath("D:\End to End Model\June_2020")
+    # results_path = os.path.abspath("D:\End to End Model\Results_June")
+
+    files_path = os.path.abspath("D:\End to End Model\June_John2020")
+    results_path = os.path.abspath("D:\End to End Model\Results_JuneJohn")
 
     # Adapt the parameters here: system mode, ao_modes, spaxel_scale, gratings, N_rays
     sys_mode = 'HARMONI'
     ao_modes = ['NOAO']
-    spaxel_scale = '10x10'
-    gratings = ['Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
-    N_rays = 1000
+    spaxel_scale = '20x20'
+    # gratings = ['Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
+    gratings = ['H']
+    N_rays = 500
 
     for grating in gratings:
         detector_ensquared_energy(zosapi=psa, sys_mode=sys_mode, ao_modes=ao_modes, spaxel_scale=spaxel_scale,
-                                  grating=grating, N_rays=N_rays, files_path=files_path, results_path=results_path)
+                                  grating=grating, N_rays=N_rays, files_path=files_path, results_path=results_path,
+                                  alpha=0.5)
 
     # Some info on speed and number of rays:
     #   - 100 rays: ~6 sec per wavelength
@@ -201,14 +207,14 @@ if __name__ == """__main__""":
 
     # Show the plot of the Ensquared Energy vs Pixel size
 
-    spaxel_scale = '10x10'
-    ensquared_spaxel_size(zosapi=psa, sys_mode=sys_mode, ao_modes=ao_modes, spaxel_scale=spaxel_scale,
-                                  grating='H', N_rays=N_rays, files_path=files_path, results_path=results_path)
-
-    del psa
-    psa = None
-
-
+    # spaxel_scale = '10x10'
+    # ensquared_spaxel_size(zosapi=psa, sys_mode=sys_mode, ao_modes=ao_modes, spaxel_scale=spaxel_scale,
+    #                               grating='H', N_rays=N_rays, files_path=files_path, results_path=results_path)
+    #
+    # del psa
+    # psa = None
+    #
+    #
 
 
 
