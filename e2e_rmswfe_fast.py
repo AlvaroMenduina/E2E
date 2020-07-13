@@ -115,6 +115,7 @@ def pupil_sampling_effect(zosapi, sys_mode, ao_modes, spaxel_scale, spaxels_per_
 
     return
 
+
 def draw_detector_boundary(ax):
     det_pix = 15e-3  # detector pixel in mm
     width = 2 * 4096 * det_pix + 3
@@ -202,14 +203,50 @@ def detector_rms_wfe(zosapi, sys_mode, ao_modes, spaxel_scale, spaxels_per_slice
             ax.set_aspect('equal')
             cbar = plt.colorbar(tpc_odd, ax=ax, orientation='horizontal')
             cbar.ax.set_xlabel('[nm]')
-            title = r'IFU-%s | %s mas | %s SPEC | %s' % (ifu_section, spaxel_scale, grating, sys_mode)
+            title = r'IFU-%s | %s | %s | %s' % (ifu_section, spaxel_scale, grating, sys_mode)
             ax.set_title(title)
-            fig_name = "FASTEST_RMSMAP_%s_DETECTOR_SPEC_%s_MODE_%s" % (spaxel_scale, grating, sys_mode)
+            fig_name = "RMSWFE_%s_DETECTOR_SPEC_%s_MODE_%s" % (spaxel_scale, grating, sys_mode)
 
             save_path = os.path.join(results_path, analysis_dir)
             if os.path.isfile(os.path.join(save_path, fig_name)):
                 os.remove(os.path.join(save_path, fig_name))
             fig.savefig(os.path.join(save_path, fig_name))
+
+    N_waves = len(waves)
+    rms_maps = np.array(rms_maps)
+    object_coord = np.array(object_coord)
+    print(object_coord.shape)
+    print(rms_maps.shape)
+    # Object space coordinates
+    for i_ifu, ifu_section in enumerate(ifu_sections):
+        for k_wave, wave_str in zip([0, N_waves // 2, -1], ['MIN', 'CENT', 'MAX']):
+
+            fig_obj, ax = plt.subplots(1, 1)
+
+            x_obj, y_obj = object_coord[i_ifu, :, :, 0].flatten(), object_coord[i_ifu, :, :, 1].flatten()
+            triang = tri.Triangulation(x_obj, y_obj)
+            rms_ = rms_maps[i_ifu, :, k_wave].flatten()
+            tpc = ax.tripcolor(triang, rms_, shading='flat', cmap='jet')
+            min_rms, max_rms = np.min(rms_), np.max(rms_)
+            tpc.set_clim(vmin=min_rms, vmax=max_rms)
+
+            axis_label = 'Object'
+            ax.set_xlabel(axis_label + r' X [mm]')
+            ax.set_ylabel(axis_label + r' Y [mm]')
+            ax.set_aspect('equal')
+            cbar = plt.colorbar(tpc, ax=ax, orientation='horizontal')
+            cbar.ax.set_xlabel('[nm]')
+
+            wave = waves[k_wave]
+
+            title = r'IFU-%s | %s mas | %s SPEC %.3f $\mu$m | %s %s' % (ifu_section, spaxel_scale, grating, wave, sys_mode, ao_modes[0])
+            ax.set_title(title)
+            fig_name = "RMSWFE_OBJECT_IFU-%s_%s_SPEC_%s_MODE_%s_%s_WAVE_%s" % (ifu_section, spaxel_scale, grating, sys_mode, ao_modes[0], wave_str)
+
+            save_path = os.path.join(results_path, analysis_dir)
+            if os.path.isfile(os.path.join(save_path, fig_name)):
+                os.remove(os.path.join(save_path, fig_name))
+            fig_obj.savefig(os.path.join(save_path, fig_name))
 
     return rms_field
 
@@ -224,11 +261,11 @@ if __name__ == """__main__""":
 
     files_path = os.path.abspath("D:\End to End Model\June_John2020")
     # files_path = os.path.abspath("D:\End to End Model\Monte_Carlo\MedianInstance")
-    results_path = os.path.abspath("D:\End to End Model\Results_JuneJohn")
+    results_path = os.path.abspath("D:\End to End Model\Results_Report\Mode_NOAO\Scale_4x4")
 
     sys_mode = 'HARMONI'
     ao_modes = ['NOAO']
-    spaxel_scale = '10x10'
+    spaxel_scale = '4x4'
     gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
     # gratings = ['H']
     analysis_dir = os.path.join(results_path, 'RMS_WFE')

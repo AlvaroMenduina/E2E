@@ -2238,6 +2238,7 @@ class FWHM_PSF_Analysis(AnalysisGeneric):
 
         return results
 
+
 class RaytraceAnalysis(AnalysisGeneric):
     """
     Raytrace analysis at any surface
@@ -2588,8 +2589,8 @@ class RMS_WFE_Analysis(AnalysisGeneric):
             results_dir = os.path.join(results_path, file_name)
             settings['surface'] = 'IMG' if surface is None else surface
 
-            # self.save_hdf5(analysis_name='RMS_WFE', analysis_metadata=metadata, list_results=list_results, results_names=results_names,
-            #                file_name=file_name, file_settings=settings, results_dir=results_path)
+            self.save_hdf5(analysis_name='RMS_WFE', analysis_metadata=metadata, list_results=list_results, results_names=results_names,
+                           file_name=file_name, file_settings=settings, results_dir=results_path)
 
 
         return results
@@ -2754,6 +2755,97 @@ class AnalysisFast(object):
 
         return list_results
 
+    def save_hdf5(self, analysis_name, analysis_metadata, list_results, results_names, file_name, file_settings, results_dir):
+
+        # First thing is to create a separate folder within the results directory for this analysis
+        hdf5_dir = os.path.join(results_dir, 'HDF5')
+        print("Analysis Results will be saved in folder: ", hdf5_dir)
+        if not os.path.exists(hdf5_dir):
+            os.mkdir(hdf5_dir)           # If not, create the directory to store results
+
+        hdf5_file = file_name + '.hdf5'
+        # Check whether the file already exists
+        if os.path.isfile(os.path.join(hdf5_dir, hdf5_file)):   # Overwrite it
+            print("HDF5 file already exists. Adding analysis")
+            with h5py.File(os.path.join(hdf5_dir, hdf5_file), 'r+') as f:
+
+                # Here we have 2 options: either we are adding another analysis type or we are adding the same type
+                # but with different settings (such as at a different surface)
+                file_keys = list(f.keys())
+                if analysis_name in file_keys:
+                    print("Analysis type already exists")
+                    analysis_group = f[analysis_name]
+                    # we need to know how many analyses of the same type already exist
+                    subgroup_keys = list(analysis_group.keys())
+                    subgroup_number = len(subgroup_keys)        # if [0, 1] already exist we call it '2'
+                    subgroup = analysis_group.create_group(str(subgroup_number))
+                    # Save results datasets
+                    for array, array_name in zip(list_results, results_names + ['WAVELENGTHS']):
+                        data = subgroup.create_dataset(array_name, data=array)
+                    # Save analysis metadata
+                    subgroup.attrs['E2E Python Git Hash'] = sha
+                    subgroup.attrs['Analysis Type'] = analysis_name
+                    date_created = datetime.datetime.now().strftime("%c")
+                    subgroup.attrs['Date'] = date_created
+                    subgroup.attrs['At Surface #'] = file_settings['surface']
+                    # Add whatever extra metadata we have:
+                    for key, value in analysis_metadata.items():
+                        subgroup.attrs[key] = value
+
+                else:       # It's a new analysis type
+
+                    # (2) Create a Group for this analysis
+                    analysis_group = f.create_group(analysis_name)
+                    # (3) Create a Sub-Group so that we can have the same analysis at multiple surfaces / wavelength ranges
+                    subgroup = analysis_group.create_group('0')
+                    # Save results datasets
+                    for array, array_name in zip(list_results, results_names + ['WAVELENGTHS']):
+                        data = subgroup.create_dataset(array_name, data=array)
+                    # Save analysis metadata
+                    subgroup.attrs['E2E Python Git Hash'] = sha
+                    subgroup.attrs['Analysis Type'] = analysis_name
+                    date_created = datetime.datetime.now().strftime("%c")
+                    subgroup.attrs['Date'] = date_created
+                    subgroup.attrs['At Surface #'] = file_settings['surface']
+                    # Add whatever extra metadata we have:
+                    for key, value in analysis_metadata.items():
+                        subgroup.attrs[key] = value
+
+        else:       # File does not exist, we create it now
+            print("Creating HDF5 file: ", hdf5_file)
+            with h5py.File(os.path.join(hdf5_dir, hdf5_file), 'w') as f:
+
+                # (1) Save Zemax Metadata
+                zemax_metadata = f.create_group('Zemax Metadata')
+                zemax_metadata.attrs['(1) Zemax File'] = file_name
+                zemax_metadata.attrs['(2) System Mode'] = file_settings['system']
+                zemax_metadata.attrs['(3) Spaxel Scale'] = file_settings['scale']
+                zemax_metadata.attrs['(4) IFU'] = file_settings['ifu']
+                zemax_metadata.attrs['(5) Grating'] = file_settings['grating']
+                AO = file_settings['AO_mode'] if 'AO_mode' in list(file_settings.keys()) else 'NA'
+                zemax_metadata.attrs['(6) AO Mode'] = AO
+
+                # (2) Create a Group for this analysis
+                analysis_group = f.create_group(analysis_name)
+
+                # (3) Create a Sub-Group so that we can have the same analysis at multiple surfaces / wavelength ranges
+                subgroup = analysis_group.create_group('0')
+                # Save results datasets
+                for array, array_name in zip(list_results, results_names + ['WAVELENGTHS']):
+                    data = subgroup.create_dataset(array_name, data=array)
+                # Save analysis metadata
+                subgroup.attrs['E2E Python Git Hash'] = sha
+                subgroup.attrs['Analysis Type'] = analysis_name
+                date_created = datetime.datetime.now().strftime("%c")
+                subgroup.attrs['Date'] = date_created
+                subgroup.attrs['At Surface #'] = file_settings['surface']
+                # Add whatever extra metadata we have:
+                for key, value in analysis_metadata.items():
+                    subgroup.attrs[key] = value
+
+        return
+
+
 
 class RMS_WFE_FastAnalysis(AnalysisFast):
     """
@@ -2915,7 +3007,7 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
         results_names = ['RMS_WFE', 'OBJ_XY', 'FOC_XY']
         N_waves = 23 if wavelength_idx is None else len(wavelength_idx)
         # we need to give the shapes of each array to self.run_analysis
-        results_shapes = [(N_waves, spaxels_per_slice,), (N_waves, spaxels_per_slice, 2), (N_waves, spaxels_per_slice, 2)]
+        results_shapes = [(N_waves, spaxels_per_slice,), (spaxels_per_slice, 2), (N_waves, spaxels_per_slice, 2)]
 
         metadata = {}
         metadata['Spaxels per slice'] = spaxels_per_slice
@@ -2941,20 +3033,43 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
 
             results.append(list_results)
 
+            # Post-Processing the results
+            file_name = zemax_file.split('.')[0]
+            settings['surface'] = 'DETECTOR' if surface is None else surface
+            self.save_hdf5(analysis_name='RMS_WFE', analysis_metadata=metadata, list_results=list_results, results_names=results_names,
+                           file_name=file_name, file_settings=settings, results_dir=results_path)
+
 
         return results
 
 class EnsquaredEnergyFastAnalysis(AnalysisFast):
+    """
+    Faster version of the Ensquared Energy calculation
+    The outside loop is only for the configurations
+    For each configuration, we construct a single Raytrace object
+    that covers all the specified wavelengths
+    """
 
     @staticmethod
     def analysis_function_ensquared(system, wavelength_idx, config, surface, slicer_surface, px, py, box_size):
         """
+        Calculation of the Ensquared Energy
 
+
+
+
+        :param system: the Zemax optical system
+        :param wavelength_idx: list of the Zemax Wavelength indices we want to use
+        :param config: the Zemax Configuration (Slice) we are going to use
+        :param surface: [not used] we always do the calculation at the last surface (Detector)
+        :param slicer_surface: Zemax surface number for the Image Slicer
+        :param px: Pupil X coordinates of the rays we will trace
+        :param py: Pupil Y coordinates of the rays we will trace
+        :param box_size: size of the box in [detector pixels] that we'll use for the calculation
+        :return:
         """
 
-        det_pix = 15e-3
-
-        start0 = time()
+        det_pix = 15e-3         # Size of the detector pixel [mm]
 
         # Set Current Configuration
         system.MCE.SetCurrentConfiguration(config)
@@ -2983,7 +3098,6 @@ class EnsquaredEnergyFastAnalysis(AnalysisFast):
         slicer_xy[:] = np.nan
         detector_xy = np.empty((N_waves, N_pupil, 2))
         detector_xy[:] = np.nan
-
 
         # (1) Run the raytrace up to the IMAGE SLICER
         raytrace = system.Tools.OpenBatchRayTrace()
@@ -3167,6 +3281,271 @@ class EnsquaredEnergyFastAnalysis(AnalysisFast):
 
         return list_results
 
+
+class FWHM_PSF_FastAnalysis(AnalysisFast):
+    """
+
+    """
+
+    def calculate_fwhm(self, surface, xy_data, PSF_window, N_points, spaxel_scale, wavelength):
+
+        start = time()
+        # Calculate the Geometric PSF
+        x, y = xy_data[:, 0], xy_data[:, 1]
+        cent_x, cent_y = np.mean(x), np.mean(y)
+
+        std_x, std_y = np.std(x), np.std(y)
+        bandwidth = min(std_x, std_y)
+        kde = KernelDensity(kernel='gaussian', bandwidth=0.5*bandwidth).fit(xy_data)
+
+        # define a grid to compute the PSF
+        xmin, xmax = cent_x - PSF_window/2/1000, cent_x + PSF_window/2/1000
+        ymin, ymax = cent_y - PSF_window/2/1000, cent_y + PSF_window/2/1000
+        x_grid = np.linspace(xmin, xmax, N_points)
+        y_grid = np.linspace(ymin, ymax, N_points)
+        xx_grid, yy_grid = np.meshgrid(x_grid, y_grid)
+        xy_grid = np.vstack([xx_grid.ravel(), yy_grid.ravel()]).T
+        log_scores = kde.score_samples(xy_grid)
+
+        psf_geo = np.exp(log_scores)
+        psf_geo /= np.max(psf_geo)
+        psf_geo = psf_geo.reshape(xx_grid.shape)
+
+        time_geopsf = time() - start
+        # print("Time to estimate GeoPSF: %.3f sec" % time_geo)
+        start = time()
+
+        psf_diffr = diffraction.add_diffraction(surface=surface, psf_geo=psf_geo, PSF_window=PSF_window,
+                                                scale_mas=spaxel_scale, wavelength=wavelength)
+        time_diffpsf = time() - start
+        # print("Time to add Diffraction: %.3f sec" % time_diffpsf)
+        start = time()
+
+        # guesses = {'IS': {4.0: }}
+
+        # Fit the PSF to a 2D Gaussian
+        fwhm_x, fwhm_y, theta = diffraction.fit_psf_to_gaussian(xx=xx_grid, yy=yy_grid, psf_data=psf_diffr, x0=cent_x, y0=cent_y)
+
+        time_gauss = time() - start
+
+        # print('FWHM time: %.3f sec for GeoPSF estimate:' % time_geopsf)
+        # print('FWHM time: %.3f sec for DiffPSF convolution:' % time_diffpsf)
+        # print('FWHM time: %.3f sec for Gaussian fit:' % time_gauss)
+
+        # fig, (ax1, ax2) = plt.subplots(1, 2)
+        # img1 = ax1.imshow(psf_geo, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
+        # plt.colorbar(img1, ax=ax1, orientation='horizontal')
+        # ax1.set_xlabel(r'X [mm]')
+        # ax1.set_ylabel(r'Y [mm]')
+        # ax1.set_title(r'Geometric PSF estimate | Surface: %s' % surface)
+        #
+        # img2 = ax2.imshow(psf_diffr, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
+        # plt.colorbar(img2, ax=ax2, orientation='horizontal')
+        # ax2.set_xlabel(r'X [mm]')
+        # ax2.set_ylabel(r'Y [mm]')
+        # if surface == 'DET':
+        #     ax2.set_title(r'Diffr. PSF | %.3f microns | %.1f mas | FWHM_x: %.1f $\mu$m' % (wavelength, spaxel_scale, fwhm_x))
+        # elif surface == 'IS':
+        #     ax2.set_title(r'Diffr. PSF | %.3f microns | %.1f mas | FWHM_y: %.1f $\mu$m' % (wavelength, spaxel_scale, fwhm_y))
+
+        return fwhm_x, fwhm_y
+
+    def analysis_function_fwhm_psf(self, system, wavelength_idx, config, surface, slicer_surface, px, py, spaxel_scale,
+                                      N_points, PSF_window):
+
+        start0 = time()
+        # Set Current Configuration
+        system.MCE.SetCurrentConfiguration(config)
+
+        # Get the Field Points for that configuration
+        sysField = system.SystemData.Fields
+        N_fields = sysField.NumberOfFields
+        N_waves = len(wavelength_idx)
+
+        X_MAX = np.max([np.abs(sysField.GetField(i + 1).X) for i in range(N_fields)])
+        Y_MAX = np.max([np.abs(sysField.GetField(i + 1).Y) for i in range(N_fields)])
+
+        # Use the Field Point at the centre of the Slice
+        fx, fy = sysField.GetField(2).X, sysField.GetField(2).Y
+        hx, hy = fx / X_MAX, fy / Y_MAX  # Normalized field coordinates (hx, hy)
+        obj_xy = np.array([fx, fy])
+
+        N_pupil = px.shape[0]   # Number of rays in the Pupil for a given field point and wavelength
+        N_rays = N_waves * N_pupil
+
+        FWHM = np.zeros((N_waves, 2))
+        foc_xy = np.zeros((N_waves, 2))
+
+        slicer_xy = np.empty((N_waves, N_pupil, 2))
+        slicer_xy[:] = np.nan
+        detector_xy = np.empty((N_waves, N_pupil, 2))
+        detector_xy[:] = np.nan
+
+        # (1) Run the raytrace up to the IMAGE SLICER
+        raytrace = system.Tools.OpenBatchRayTrace()
+        # remember to specify the surface to which you are tracing!
+        rays_slicer = raytrace.CreateNormUnpol(N_rays, constants.RaysType_Real, slicer_surface)
+
+        # Loop over all wavelengths
+        for i_wave, wave_idx in enumerate(wavelength_idx):
+
+            for (p_x, p_y) in zip(px, py):  # Add the ray to the RayTrace
+                rays_slicer.AddRay(wave_idx, hx, hy, p_x, p_y, constants.OPDMode_None)
+
+        CastTo(raytrace, 'ISystemTool').RunAndWaitForCompletion()
+        rays_slicer.StartReadingResults()
+        checksum_slicer = 0
+        for k in range(N_rays):  # Get Raytrace results at the Image Slicer
+            i_wave = k // N_pupil
+            j_pupil = k % N_pupil
+            # print(i_wave, j_pupil)
+            output = rays_slicer.ReadNextResult()
+            if output[2] == 0:
+                slicer_xy[i_wave, j_pupil, 0] = output[4]
+                slicer_xy[i_wave, j_pupil, 1] = output[5]
+                checksum_slicer += 1
+        if checksum_slicer < N_rays:
+            raise ValueError('Some rays were lost before the Image Slicer')
+
+        rays_slicer.ClearData()
+
+        # (2) Run the raytrace up to the DETECTOR
+        # For speed, we re-use the same Raytrace, just define new rays!
+        # raytrace_det = system.Tools.OpenBatchRayTrace()
+        # Detector is always the last surface
+        detector_surface = system.LDE.NumberOfSurfaces - 1
+        rays_detector = raytrace.CreateNormUnpol(N_rays, constants.RaysType_Real, detector_surface)
+        # Loop over all wavelengths
+        for i_wave, wave_idx in enumerate(wavelength_idx):
+            for (p_x, p_y) in zip(px, py):
+                rays_detector.AddRay(wave_idx, hx, hy, p_x, p_y, constants.OPDMode_None)
+
+        CastTo(raytrace, 'ISystemTool').RunAndWaitForCompletion()
+
+        rays_detector.StartReadingResults()
+        checksum_detector = 0
+        index_valid_detector = np.empty((N_waves, N_pupil))
+        index_valid_detector[:] = np.nan
+        for k in range(N_rays):  # Get Raytrace results at the Detector
+            i_wave = k // N_pupil
+            j_pupil = k % N_pupil
+            output = rays_detector.ReadNextResult()
+            if output[2] == 0:       # ErrorCode & VignetteCode
+                detector_xy[i_wave, j_pupil, 0] = output[4]
+                detector_xy[i_wave, j_pupil, 1] = output[5]
+                checksum_detector += 1
+                index_valid_detector[i_wave, j_pupil] = j_pupil
+            #
+            # elif output[2] == 0 and output[3] != 0:
+            #     # Some rays are vignetted
+            #     code = output[3]
+            #     vignetting_surface = system.LDE.GetSurfaceAt(code).Comment
+            #     # print("Config #%d | Wave #%d || Vignetting at surface #%d: %s" % (config, wavelength_idx[i_wave], code, vignetting_surface))
+
+        rays_detector.ClearData()
+        CastTo(raytrace, 'ISystemTool').Close()
+
+        # time_rays = time() - start0
+        # print("Time for Raytrace Slicer and Detector: %.3f sec" % time_rays)
+
+        # fig, axes = plt.subplots(2, N_waves)
+        # colors = cm.Reds(np.linspace(0.5, 1, N_waves))
+        # for j in range(N_waves):
+        #     ax1 = axes[0][j]
+        #     ax1.scatter(slicer_xy[j, :, 0], slicer_xy[j, :, 1], s=3, color=colors[j])
+        #     # scx =
+        #     # ax1.scatter(sli_foc_xy[j, 0], sli_foc_xy[j, 1], s=3, color='black')
+        #     # scy = sli_foc_xy[j, 1]
+        #     # ax1.axhline(y=scy + 1.0 * box_size / 2, color='black', linestyle='--')
+        #     # ax1.axhline(y=scy - 1.0 * box_size / 2, color='black', linestyle='--')
+        #     wavelength = system.SystemData.Wavelengths.GetWavelength(wavelength_idx[j]).Wavelength
+        #     ax1.set_title("%.3f $\mu$m" % wavelength)
+        #
+        #     ax2 = axes[1][j]
+        #     # dcx = det_foc_xy[j, 0]
+        #     ax2.scatter(detector_xy[j, :, 0], detector_xy[j, :, 1], s=3, color=colors[j])
+        #     # ax2.scatter(det_foc_xy[j, 0], det_foc_xy[j, 1], s=3, color='black')
+        #     # ax2.axvline(x=dcx + det_pix * box_size / 2, color='black', linestyle='--')
+        #     # ax2.axvline(x=dcx - det_pix * box_size / 2, color='black', linestyle='--')
+        #
+
+        # FWHM
+
+        windows = {4.0: [5000, 200], 60.0: [500, 50]}
+        win_slicer = windows[spaxel_scale][0]
+        win_detect = windows[spaxel_scale][1]
+        if config == 1:
+            print("Sampling the Image Slicer plane with %d points: %.3f microns / point" % (N_points, (win_slicer / N_points)))
+            print("Sampling the Detector plane with %d points: %.3f microns / point" % (N_points, (win_detect / N_points)))
+
+        for i_wave, wave_idx in enumerate(wavelength_idx):
+
+            xy_data_slicer = slicer_xy[i_wave]
+            wavelength = system.SystemData.Wavelengths.GetWavelength(wave_idx).Wavelength
+            fwhm_x_slicer, fwhm_y_slicer = self.calculate_fwhm(surface='IS', xy_data=xy_data_slicer, PSF_window=win_slicer,
+                                                               N_points=N_points, spaxel_scale=spaxel_scale,
+                                                               wavelength=wavelength)
+
+            xy_data_detector = detector_xy[i_wave]
+            fwhm_x_det, fwhm_y_det = self.calculate_fwhm(surface='DET', xy_data=xy_data_detector, PSF_window=win_detect,
+                                                         N_points=N_points, spaxel_scale=spaxel_scale,
+                                                         wavelength=wavelength)
+
+            plt.show()
+
+            foc_xy[i_wave] = [np.mean(xy_data_detector[:, 0]), np.mean(xy_data_detector[:, 1])]
+
+            FWHM[i_wave] = [fwhm_x_det, fwhm_y_slicer]
+
+            if config == 1:
+                print("%.3f microns" % wavelength)
+                print("FWHM in X [Detector]: %.1f microns | in Y [Image Slicer]: %.2f microns " % (fwhm_x_det, fwhm_y_slicer))
+
+        # plt.show()
+
+        return FWHM, obj_xy, foc_xy
+
+
+    def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
+                        configuration_idx=None, surface=None, N_rays=500, N_points=50, PSF_window=150):
+        """
+
+        """
+
+        # We want the result to produce as output: the RMS WFE array, and the RayTrace at both Object and Focal plane
+        results_names = ['FWHM', 'OBJ_XY', 'FOC_XY']
+        # we need to give the shapes of each array to self.run_analysis
+        N_waves = 23 if wavelength_idx is None else len(wavelength_idx)
+        results_shapes = [(N_waves, 2,), (2,), (N_waves, 2,)]
+
+        px, py = define_pupil_sampling(r_obsc=0.2841, N_rays=N_rays, mode='random')
+        print("Using %d rays" % N_rays)
+
+        # read the file options
+        file_list, sett_list = create_zemax_file_list(which_system=files_opt['which_system'], AO_modes=files_opt['AO_modes'],
+                                           scales=files_opt['scales'], IFUs=files_opt['IFUs'], grating=files_opt['grating'])
+
+        results = []
+        for zemax_file, settings in zip(file_list, sett_list):
+
+            # Clear the Cache for the Airy Pattern function
+            airy_and_slicer.cache_clear()
+
+            mas_dict = {'4x4': 4.0, '10x10': 10.0, '20x20': 20.0, '60x30': 60.0}
+            spaxel_scale = mas_dict[settings['scale']]
+
+            # We need to know what is the Surface Number for the Image Slicer in the Zemax file
+            slicer_surface = focal_planes[settings['system']][settings['scale']][settings['ifu']]['IS']
+
+            list_results = self.run_analysis(analysis_function=self.analysis_function_fwhm_psf,
+                                             files_dir=files_dir, zemax_file=zemax_file, results_path=results_path,
+                                             results_shapes=results_shapes, results_names=results_names,
+                                             wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
+                                             surface=surface, slicer_surface=slicer_surface, px=px, py=py,
+                                             spaxel_scale=spaxel_scale, N_points=N_points, PSF_window=PSF_window)
+            results.append(list_results)
+
+        return results
 
 
 if __name__ == """__main__""":
