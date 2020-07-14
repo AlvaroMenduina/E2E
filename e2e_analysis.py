@@ -2880,6 +2880,8 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
 
         hx = np.linspace(hx_min, hx_max, spaxels_per_slice)
         hy = np.linspace(hy_min, hy_max, spaxels_per_slice)
+        # hx = np.array([sysField.GetField(i + 1).X / X_MAX for i in range(N_fields)])
+        # hy = np.array([sysField.GetField(i + 1).Y / Y_MAX for i in range(N_fields)])
 
         # The Field coordinates for the Object
         obj_xy = np.array([X_MAX * hx, Y_MAX * hy]).T
@@ -3252,13 +3254,19 @@ class EnsquaredEnergyFastAnalysis(AnalysisFast):
         # we need to give the shapes of each array to self.run_analysis
         results_shapes = [(N_waves,), (2,), (N_waves, 2,), (N_waves, 2,)]
 
+        metadata = {}
+        metadata['N_rays'] = N_rays
+        metadata['Box Size Spaxels'] = box_size
+        metadata['Configurations'] = 'All' if configuration_idx is None else configuration_idx
+        metadata['Wavelengths'] = 'All' if wavelength_idx is None else wavelength_idx
+
         # read the file options
         file_list, file_settings = create_zemax_file_list(which_system=files_opt['which_system'],
                                                           AO_modes=files_opt['AO_modes'],
                                                           scales=files_opt['scales'], IFUs=files_opt['IFUs'],
                                                           grating=files_opt['grating'])
 
-        list_results = []
+        results = []
         for zemax_file, settings in zip(file_list, file_settings):
             system = settings['system']
             spaxel_scale = settings['scale']
@@ -3271,15 +3279,21 @@ class EnsquaredEnergyFastAnalysis(AnalysisFast):
             px, py = define_pupil_sampling(r_obsc=0.2841, N_rays=N_rays, mode='random')
             print("Using %d rays" % N_rays)
 
-            results = self.run_analysis(analysis_function=self.analysis_function_ensquared,
+            list_results = self.run_analysis(analysis_function=self.analysis_function_ensquared,
                                         files_dir=files_dir, zemax_file=zemax_file, results_path=results_path,
                                         results_shapes=results_shapes, results_names=results_names,
                                         wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
                                         slicer_surface=slicer_surface, px=px, py=py, box_size=box_size)
 
-            list_results.append(results)
+            results.append(list_results)
 
-        return list_results
+            # Post-Processing the results
+            file_name = zemax_file.split('.')[0]
+            settings['surface'] = 'DETECTOR'
+            self.save_hdf5(analysis_name='ENSQ_ENERG', analysis_metadata=metadata, list_results=list_results, results_names=results_names,
+                           file_name=file_name, file_settings=settings, results_dir=results_path)
+
+        return results
 
 
 class FWHM_PSF_FastAnalysis(AnalysisFast):
@@ -3544,6 +3558,113 @@ class FWHM_PSF_FastAnalysis(AnalysisFast):
                                              surface=surface, slicer_surface=slicer_surface, px=px, py=py,
                                              spaxel_scale=spaxel_scale, N_points=N_points, PSF_window=PSF_window)
             results.append(list_results)
+
+        return results
+
+
+
+class CommonWavelengthRange(AnalysisFast):
+    """
+    Calculate the Common Wavelength Range
+    """
+
+    @staticmethod
+    def analysis_function_cwr(system, wavelength_idx, config, surface):
+
+        # Set Current Configuration
+        system.MCE.SetCurrentConfiguration(config)
+
+        # Get the Field Points for that configuration
+        sysField = system.SystemData.Fields
+        N_fields = sysField.NumberOfFields
+        N_waves = len(wavelength_idx)
+
+        fx_min, fy_min = sysField.GetField(1).X, sysField.GetField(1).Y
+        fx_max, fy_max = sysField.GetField(N_fields).X, sysField.GetField(N_fields).Y
+
+        X_MAX = np.max([np.abs(sysField.GetField(i + 1).X) for i in range(N_fields)])
+        Y_MAX = np.max([np.abs(sysField.GetField(i + 1).Y) for i in range(N_fields)])
+
+        hx = np.array([sysField.GetField(i + 1).X / X_MAX for i in range(N_fields)])
+        hy = np.array([sysField.GetField(i + 1).Y / Y_MAX for i in range(N_fields)])
+
+        # The Field coordinates for the Object
+        obj_xy = np.array([X_MAX * hx, Y_MAX * hy]).T
+        foc_xy = np.empty((N_waves, N_fields, 2))
+
+        N_rays = N_waves * N_fields
+
+        raytrace = system.Tools.OpenBatchRayTrace()
+        normUnPolData = raytrace.CreateNormUnpol(N_rays, constants.RaysType_Real, surface)
+
+        # Loop over the wavelengths
+        for i_wave, wave_idx in enumerate(wavelength_idx):
+
+            # Loop over all Spaxels in the Slice
+            for j_field, (h_x, h_y) in enumerate(zip(hx, hy)):
+
+                # Add the ray to the RayTrace
+                normUnPolData.AddRay(wave_idx, h_x, h_y, 0, 0, constants.OPDMode_None)
+
+        # Run the RayTrace for the whole Slice
+        CastTo(raytrace, 'ISystemTool').RunAndWaitForCompletion()
+        # time_ray = time() - start
+        # print("Time spent running Raytrace: %.3f sec" % time_ray)
+
+        # start = time()
+        normUnPolData.StartReadingResults()
+        # Loop over the wavelengths
+        for i_wave, wave_idx in enumerate(wavelength_idx):
+            # Loop over all Spaxels in the Slice
+            for j_field, (h_x, h_y) in enumerate(zip(hx, hy)):
+
+                output = normUnPolData.ReadNextResult()
+                if output[2] == 0:
+                    x, y = output[4], output[5]
+                    foc_xy[i_wave, j_field, 0] = x
+                    foc_xy[i_wave, j_field, 1] = y
+
+        normUnPolData.ClearData()
+        CastTo(raytrace, 'ISystemTool').Close()
+
+        return [foc_xy]
+
+    def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
+                        configuration_idx=None, surface=None):
+
+        results_names = ['FOC_XY', ]
+        N_waves = 23 if wavelength_idx is None else len(wavelength_idx)
+        # we need to give the shapes of each array to self.run_analysis
+        results_shapes = [(N_waves, 3, 2), ]
+
+        metadata = {}
+        metadata['Configurations'] = 'All' if configuration_idx is None else configuration_idx
+        metadata['Wavelengths'] = 'All' if wavelength_idx is None else wavelength_idx
+
+
+        # read the file options
+        file_list, sett_list = create_zemax_file_list(which_system=files_opt['which_system'],
+                                                      AO_modes=files_opt['AO_modes'], scales=files_opt['scales'],
+                                                      IFUs=files_opt['IFUs'], grating=files_opt['grating'])
+
+        # Loop over the Zemax files
+        results = []
+        for zemax_file, settings in zip(file_list, sett_list):
+
+            list_results = self.run_analysis(analysis_function=self.analysis_function_cwr,
+                                             files_dir=files_dir, zemax_file=zemax_file, results_path=results_path,
+                                             results_shapes=results_shapes, results_names=results_names,
+                                             wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
+                                             surface=surface)
+
+            results.append(list_results)
+
+            # Post-Processing the results
+            file_name = zemax_file.split('.')[0]
+            settings['surface'] = 'DETECTOR' if surface is None else surface
+            self.save_hdf5(analysis_name='COMMON_WAVELENGTH_RANGE', analysis_metadata=metadata,
+                           list_results=list_results, results_names=results_names,
+                           file_name=file_name, file_settings=settings, results_dir=results_path)
 
         return results
 
