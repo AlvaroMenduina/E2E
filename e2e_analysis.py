@@ -2968,6 +2968,12 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
                     foc_xy[i_wave, j_field, 0] = x
                     foc_xy[i_wave, j_field, 1] = y
 
+                    vignet_code = output[3]
+                    if vignet_code != 0:
+
+                        vignetting_surface = system.LDE.GetSurfaceAt(vignet_code).Comment
+                        # print("Vignetting at surface #%d: %s" % (vignet_code, vignetting_surface))
+
         normUnPolData.ClearData()
         CastTo(raytrace, 'ISystemTool').Close()
         # time_res = time() - start
@@ -2989,7 +2995,8 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
     # and "plot_RMS_WFE_maps" to save the figures
 
     def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
-                        configuration_idx=None, surface=None, spaxels_per_slice=3, pupil_sampling=4):
+                        configuration_idx=None, surface=None, spaxels_per_slice=3, pupil_sampling=4,
+                        save_hdf5=True):
         """
         Function that loops over a given set of E2E model Zemax files, running the analysis
         defined by self.analysis_function_rms_wfe
@@ -3035,11 +3042,12 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
 
             results.append(list_results)
 
-            # Post-Processing the results
-            file_name = zemax_file.split('.')[0]
-            settings['surface'] = 'DETECTOR' if surface is None else surface
-            self.save_hdf5(analysis_name='RMS_WFE', analysis_metadata=metadata, list_results=list_results, results_names=results_names,
-                           file_name=file_name, file_settings=settings, results_dir=results_path)
+            if save_hdf5 == True:
+                # Post-Processing the results
+                file_name = zemax_file.split('.')[0]
+                settings['surface'] = 'DETECTOR' if surface is None else surface
+                self.save_hdf5(analysis_name='RMS_WFE', analysis_metadata=metadata, list_results=list_results, results_names=results_names,
+                               file_name=file_name, file_settings=settings, results_dir=results_path)
 
 
         return results
@@ -3075,6 +3083,11 @@ class EnsquaredEnergyFastAnalysis(AnalysisFast):
 
         # Set Current Configuration
         system.MCE.SetCurrentConfiguration(config)
+
+        # Double check that the Image Slicer surface number is correct
+        slicer = system.LDE.GetSurfaceAt(slicer_surface).Comment
+        if slicer != 'Image Plane':
+            raise ValueError("Surface #%d is not the Image Slicer. Please check the Zemax file" % slicer_surface)
 
         # Get the Field Points for that configuration
         sysField = system.SystemData.Fields
