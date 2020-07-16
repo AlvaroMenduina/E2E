@@ -251,12 +251,13 @@ def detector_rms_wfe(zosapi, sys_mode, ao_modes, spaxel_scale, spaxels_per_slice
             cbar.ax.set_xlabel('[nm]')
             title = r'IFU-%s | %s | %s | %s' % (ifu_section, spaxel_scale, grating, sys_mode)
             ax.set_title(title)
-            fig_name = "RMSWFE_%s_DETECTOR_SPEC_%s_MODE_%s_%s" % (spaxel_scale, grating, sys_mode, ao_modes[0])
 
-            save_path = os.path.join(results_path, analysis_dir)
-            if os.path.isfile(os.path.join(save_path, fig_name)):
-                os.remove(os.path.join(save_path, fig_name))
-            fig.savefig(os.path.join(save_path, fig_name))
+    fig_name = "RMSWFE_%s_DETECTOR_SPEC_%s_MODE_%s_%s" % (spaxel_scale, grating, sys_mode, ao_modes[0])
+
+    save_path = os.path.join(results_path, analysis_dir)
+    if os.path.isfile(os.path.join(save_path, fig_name)):
+        os.remove(os.path.join(save_path, fig_name))
+    fig.savefig(os.path.join(save_path, fig_name))
 
     N_waves = len(waves)
     rms_maps = np.array(rms_maps)
@@ -303,14 +304,14 @@ if __name__ == """__main__""":
 
     # [*] This is the bit we have to change when you run the analysis in your system [*]
     sys_mode = 'HARMONI'
-    ao_modes = ['SCAO']
-    spaxel_scale = '4x4'
+    ao_modes = ['NOAO']
+    spaxel_scale = '10x10'
     spaxels_per_slice = 3       # How many field points per Slice to use
     pupil_sampling = 4          # N x N grid per pupil quadrant. See Zemax Operand help for RWRE
     gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
     # gratings = ['H']
     files_path = os.path.abspath("D:\End to End Model\June_John2020")
-    results_path = os.path.abspath("D:\End to End Model\Results_Report\Mode_SCAO\Scale_%s" % spaxel_scale)
+    results_path = os.path.abspath("D:\End to End Model\Results_Report\Mode_NOAO\Scale_%s" % spaxel_scale)
     # [*] This is the bit we have to change when you run the analysis in your system [*]
 
     # First we want to justify the choice of Pupil Sampling.

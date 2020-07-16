@@ -368,7 +368,7 @@ class DiffractionEffects(object):
         g = offset + amplitude * np.exp(-(a * ((x - x0) ** 2) + 2 * b * (x - x0) * (y - y0) + c * ((y - y0) ** 2)))
         return g
 
-    def fit_psf_to_gaussian(self, xx, yy, psf_data, x0, y0):
+    def fit_psf_to_gaussian(self, xx, yy, psf_data, x0, y0, sigmax0, sigmay0):
         """
         Fit a PSF array to a 2D Gaussian
         :param xx: grid of X values to evaluate the Gaussian
@@ -380,10 +380,10 @@ class DiffractionEffects(object):
         """
         peak0, offset0 = 1.0, 0.0     # Guesses
         rotation0 = 0.0              # Guesses
-        # We guess that the FWHM will be around 2 detector pixels [30 microns]
-        # Using the formula for a Gaussian FWHM = 2 sqrt(2 ln(2)) Sigma
-        sigma_fwhm = 100e-3 / 2 * np.sqrt(2 * np.log(2))
-        sigmax0, sigmay0 = sigma_fwhm, sigma_fwhm
+        # # We guess that the FWHM will be around 2 detector pixels [30 microns]
+        # # Using the formula for a Gaussian FWHM = 2 sqrt(2 ln(2)) Sigma
+        # sigma_fwhm = 100e-3 / 2 * np.sqrt(2 * np.log(2))
+        # sigmax0, sigmay0 = sigma_fwhm, sigma_fwhm
 
         guess_param = [x0, y0, sigmax0, sigmay0, peak0, offset0]
         bounds = ([-np.inf, -np.inf, 0.0, 0.0, 0, -np.inf],
@@ -391,16 +391,54 @@ class DiffractionEffects(object):
         # we don't let the theta vary more than +-45 degrees because that would
         # flip the values of FWHM_X and FWHM_Y
 
-        try:
-            pars, cov = curve_fit(self.gaussian2d, (xx.ravel(), yy.ravel()), psf_data.ravel(),
-                                  p0=guess_param, bounds=bounds)
-            # Results of the fit for the sigmaX, sigmaY and theta
-            sigmaX, sigmaY, theta = pars[2], pars[3], pars[4]
+        while True:
 
-        except RuntimeError:    # If it fails to converge
+            try:
+                pars, cov = curve_fit(self.gaussian2d, (xx.ravel(), yy.ravel()), psf_data.ravel(),
+                                      p0=guess_param, bounds=bounds)
+                # Results of the fit for the sigmaX, sigmaY and theta
+                sigmaX, sigmaY, theta = pars[2], pars[3], pars[4]
+                # print("Successful Guassian Fit")
+                break
 
-            sigmaX, sigmaY, theta = np.nan, np.nan, np.nan
-            print("\n[WARNING] Gaussian Fit of the PSF failed!")
+            except RuntimeError:  # If it fails to converge
+                # sigmaX, sigmaY, theta = np.nan, np.nan, np.nan
+                print("\n[WARNING] Gaussian Fit of the PSF failed!")
+
+                # try with other guesses
+                deltax = np.random.uniform(low=-1.0, high=1.0)
+                deltay = np.random.uniform(low=-1.0, high=1.0)
+                new_sigmax0 = (1 + deltax) * sigmax0
+                new_sigmay0 = (1 + deltay) * sigmay0
+                print("Trying with new Sigmas: X %.3f & Y %.3f microns" % (1e3 * new_sigmax0, 1e3 * new_sigmay0))
+                guess_param = [x0, y0, new_sigmax0, new_sigmay0, peak0, offset0]
+
+            # if sigmaX > 0.0 and sigmaY > 0.0:  # we found a reasonable value
+            #     break
+
+
+        # try:
+        #     pars, cov = curve_fit(self.gaussian2d, (xx.ravel(), yy.ravel()), psf_data.ravel(),
+        #                           p0=guess_param, bounds=bounds)
+        #     # Results of the fit for the sigmaX, sigmaY and theta
+        #     sigmaX, sigmaY, theta = pars[2], pars[3], pars[4]
+        #
+        # except RuntimeError:    # If it fails to converge
+        #
+        #     # sigmaX, sigmaY, theta = np.nan, np.nan, np.nan
+        #     print("\n[WARNING] Gaussian Fit of the PSF failed!")
+        #
+        #     # try with other guesses
+        #     deltax = np.random.uniform(low=-1.0, high=1.0)
+        #     deltay = np.random.uniform(low=-1.0, high=1.0)
+        #     new_sigmax0 = (1 + deltax) * sigmax0
+        #     new_sigmay0 = (1 + deltay) * sigmay0
+        #     print("Trying with new Sigmas: X %.3f & Y %.3f microns" % (1e3 * new_sigmax0, 1e3*new_sigmay0))
+        #     self.fit_psf_to_gaussian(xx, yy, psf_data, x0, y0, new_sigmax0, new_sigmay0)
+        #     # plt.figure()
+        #     # plt.imshow(psf_data)
+        #     # plt.colorbar()
+        #     # plt.show()
 
         fwhm_x = 2 * np.sqrt(2 * np.log(2)) * sigmaX * 1000
         fwhm_y = 2 * np.sqrt(2 * np.log(2)) * sigmaY * 1000
@@ -3086,7 +3124,8 @@ class EnsquaredEnergyFastAnalysis(AnalysisFast):
 
         # Double check that the Image Slicer surface number is correct
         slicer = system.LDE.GetSurfaceAt(slicer_surface).Comment
-        if slicer != 'Image Plane':
+        if slicer != 'Image Plane' and slicer != 'Image plane':
+            print(slicer)
             raise ValueError("Surface #%d is not the Image Slicer. Please check the Zemax file" % slicer_surface)
 
         # Get the Field Points for that configuration
@@ -3323,7 +3362,7 @@ class FWHM_PSF_FastAnalysis(AnalysisFast):
 
         std_x, std_y = np.std(x), np.std(y)
         bandwidth = min(std_x, std_y)
-        kde = KernelDensity(kernel='gaussian', bandwidth=0.5*bandwidth).fit(xy_data)
+        kde = KernelDensity(kernel='gaussian', bandwidth=bandwidth).fit(xy_data)
 
         # define a grid to compute the PSF
         xmin, xmax = cent_x - PSF_window/2/1000, cent_x + PSF_window/2/1000
@@ -3351,7 +3390,9 @@ class FWHM_PSF_FastAnalysis(AnalysisFast):
         # guesses = {'IS': {4.0: }}
 
         # Fit the PSF to a 2D Gaussian
-        fwhm_x, fwhm_y, theta = diffraction.fit_psf_to_gaussian(xx=xx_grid, yy=yy_grid, psf_data=psf_diffr, x0=cent_x, y0=cent_y)
+        guess_x = PSF_window / 2 / 1000
+        fwhm_x, fwhm_y, theta = diffraction.fit_psf_to_gaussian(xx=xx_grid, yy=yy_grid, psf_data=psf_diffr,
+                                                                x0=cent_x, y0=cent_y, sigmax0=guess_x, sigmay0=guess_x)
 
         time_gauss = time() - start
 
@@ -3518,7 +3559,7 @@ class FWHM_PSF_FastAnalysis(AnalysisFast):
                                                          N_points=N_points, spaxel_scale=spaxel_scale,
                                                          wavelength=wavelength)
 
-            plt.show()
+            # plt.show()
 
             foc_xy[i_wave] = [np.mean(xy_data_detector[:, 0]), np.mean(xy_data_detector[:, 1])]
 
