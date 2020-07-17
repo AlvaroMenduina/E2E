@@ -304,20 +304,21 @@ if __name__ == """__main__""":
 
     # [*] This is the bit we have to change when you run the analysis in your system [*]
     sys_mode = 'HARMONI'
-    ao_modes = ['NOAO']
-    spaxel_scale = '10x10'
+    ao_modes = ['SCAO']
+    spaxel_scale = '20x20'
     spaxels_per_slice = 3       # How many field points per Slice to use
     pupil_sampling = 4          # N x N grid per pupil quadrant. See Zemax Operand help for RWRE
     gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
     # gratings = ['H']
     files_path = os.path.abspath("D:\End to End Model\June_John2020")
-    results_path = os.path.abspath("D:\End to End Model\Results_Report\Mode_NOAO\Scale_%s" % spaxel_scale)
+    results_path = os.path.abspath("D:\End to End Model\Results_Report\Mode_SCAO\Scale_%s" % spaxel_scale)
     # [*] This is the bit we have to change when you run the analysis in your system [*]
 
     # First we want to justify the choice of Pupil Sampling.
     # Comment this out if you want to run the normal analysis
-    # pupil_sampling_effect(zosapi=psa, sys_mode=sys_mode, ao_modes=ao_modes, spaxel_scale=spaxel_scale,
-    #                       spaxels_per_slice=spaxels_per_slice, grating='K', files_path=files_path, results_path=results_path)
+    # for grating in gratings:
+    #     pupil_sampling_effect(zosapi=psa, sys_mode=sys_mode, ao_modes=ao_modes, spaxel_scale=spaxel_scale,
+    #                           spaxels_per_slice=spaxels_per_slice, grating=grating, files_path=files_path, results_path=results_path)
 
     # This is the core of the analysis. We loop over all spectral bands, calculating the RMS WFE
     rms_grating = []

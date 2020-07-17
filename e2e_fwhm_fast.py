@@ -135,7 +135,7 @@ def fwhm_psf_detector(zosapi, sys_mode, ao_modes, spaxel_scale, grating, N_confi
                 ax.set_aspect('equal')
                 cbar = plt.colorbar(tpc_odd, ax=ax, orientation='horizontal')
                 cbar.ax.set_xlabel('[$\mu$m]')
-                title = r'%s IFU-%s | %s | %s | %s' % (label, ifu_section, spaxel_scale, grating, sys_mode)
+                title = r'%s IFU-%s | %s | %s | %s' % (label, ifu_section, spaxel_scale, grating, ao_modes[0])
                 ax.set_title(title)
 
         fig_name = "%s_%s_DETECTOR_SPEC_%s_MODE_%s_%s" % (label, spaxel_scale, grating, sys_mode, ao_modes[0])
