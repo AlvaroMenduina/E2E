@@ -2998,7 +2998,7 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
                 wavelength = system.SystemData.Wavelengths.GetWavelength(wave_idx).Wavelength
 
                 RMS_WFE[i_wave, j_field] = wavelength * 1e3 * rms  # We assume the Wavelength comes in Microns
-                # print("Row #%d: Wave %.3f micron | Field #%d -> RMS %.3f" % (irow, wavelength, j_field + 1, rms))
+                print("Row #%d: Wave %.3f micron | Field #%d -> RMS %.3f" % (irow, wavelength, j_field + 1, rms))
 
                 output = normUnPolData.ReadNextResult()
                 if output[2] == 0:
@@ -3010,7 +3010,8 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
                     if vignet_code != 0:
 
                         vignetting_surface = system.LDE.GetSurfaceAt(vignet_code).Comment
-                        # print("Vignetting at surface #%d: %s" % (vignet_code, vignetting_surface))
+                        print("\nConfig #%d" % (config))
+                        print("Vignetting at surface #%d: %s" % (vignet_code, vignetting_surface))
 
         normUnPolData.ClearData()
         CastTo(raytrace, 'ISystemTool').Close()
@@ -3721,6 +3722,153 @@ class CommonWavelengthRange(AnalysisFast):
                            file_name=file_name, file_settings=settings, results_dir=results_path)
 
         return results
+
+
+
+class Raytrace_FastAnalysis(AnalysisFast):
+    """
+    Ex
+    """
+
+    @staticmethod
+    def analysis_function_raytrace(system, wavelength_idx, config, spaxels_per_slice, surface, ignore_vignetting):
+        """
+
+        """
+        start0 = time()
+
+        # Set Current Configuration
+        system.MCE.SetCurrentConfiguration(config)
+
+        # Get the Field Points for that configuration
+        sysField = system.SystemData.Fields
+        N_fields = sysField.NumberOfFields
+        N_waves = len(wavelength_idx)
+        N_rays = N_waves * spaxels_per_slice
+
+        fx_min, fy_min = sysField.GetField(1).X, sysField.GetField(1).Y
+        fx_max, fy_max = sysField.GetField(N_fields).X, sysField.GetField(N_fields).Y
+
+        X_MAX = np.max([np.abs(sysField.GetField(i + 1).X) for i in range(N_fields)])
+        Y_MAX = np.max([np.abs(sysField.GetField(i + 1).Y) for i in range(N_fields)])
+
+        # Normalized field coordinates (hx, hy)
+        hx_min, hx_max = fx_min / X_MAX, fx_max / X_MAX
+        hy_min, hy_max = fy_min / Y_MAX, fy_max / Y_MAX
+
+        hx = np.linspace(hx_min, hx_max, spaxels_per_slice)
+        hy = np.linspace(hy_min, hy_max, spaxels_per_slice)
+        # hx = np.array([sysField.GetField(i + 1).X / X_MAX for i in range(N_fields)])
+        # hy = np.array([sysField.GetField(i + 1).Y / Y_MAX for i in range(N_fields)])
+
+        # The Field coordinates for the Object
+        obj_xy = np.array([X_MAX * hx, Y_MAX * hy]).T
+        foc_xy = np.empty((N_waves, spaxels_per_slice, 2))
+
+        raytrace = system.Tools.OpenBatchRayTrace()
+        normUnPolData = raytrace.CreateNormUnpol(N_rays, constants.RaysType_Real, surface)
+
+        # Loop over the wavelengths
+        for i_wave, wave_idx in enumerate(wavelength_idx):
+
+            # Loop over all Spaxels in the Slice
+            for j_field, (h_x, h_y) in enumerate(zip(hx, hy)):
+
+                # Add the ray to the RayTrace
+                normUnPolData.AddRay(wave_idx, h_x, h_y, 0, 0, constants.OPDMode_None)
+
+        # Run the RayTrace for the whole Slice
+        CastTo(raytrace, 'ISystemTool').RunAndWaitForCompletion()
+        # time_ray = time() - start
+        # print("Time spent running Raytrace: %.3f sec" % time_ray)
+
+        # start = time()
+        normUnPolData.StartReadingResults()
+
+        # Retrieve the results for the operands and raytrace
+        # Loop over the wavelengths
+        for i_wave, wave_idx in enumerate(wavelength_idx):
+            # Loop over all Spaxels in the Slice
+            for j_field, (h_x, h_y) in enumerate(zip(hx, hy)):
+
+                output = normUnPolData.ReadNextResult()
+                if ignore_vignetting == False:
+
+                    if output[2] == 0 and output[3] == 0:
+                        x, y = output[4], output[5]
+                        foc_xy[i_wave, j_field, 0] = x
+                        foc_xy[i_wave, j_field, 1] = y
+
+                    elif output[2] == 0 and output[3] != 0:
+                        vignet_code = output[3]
+                        vignetting_surface = system.LDE.GetSurfaceAt(vignet_code).Comment
+                        print("\nConfig #%d | Wavelength idx #%d" % (config, wave_idx))
+                        fx, fy = h_x * X_MAX, h_y * Y_MAX
+                        print("Field point #%d : hx=%.4f hy=%.4f | fx=%.4f, fy=%.4f" % (j_field + 1, h_x, h_y, fx, fy))
+                        print("Vignetting at surface #%d: %s" % (vignet_code, vignetting_surface))
+                else:
+                    if output[2] == 0:
+                        x, y = output[4], output[5]
+                        foc_xy[i_wave, j_field, 0] = x
+                        foc_xy[i_wave, j_field, 1] = y
+
+
+        normUnPolData.ClearData()
+        CastTo(raytrace, 'ISystemTool').Close()
+        # time_res = time() - start
+        # print("Time spent reading results: %.3f sec" % time_res)
+
+        return [obj_xy, foc_xy]
+
+
+    def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
+                        configuration_idx=None, surface=None, spaxels_per_slice=3, ignore_vignetting=False,
+                        save_hdf5=True):
+        """
+
+        """
+
+
+        results_names = ['OBJ_XY', 'FOC_XY']
+        N_waves = 23 if wavelength_idx is None else len(wavelength_idx)
+        # we need to give the shapes of each array to self.run_analysis
+        results_shapes = [(spaxels_per_slice, 2), (N_waves, spaxels_per_slice, 2)]
+
+        metadata = {}
+        metadata['Spaxels per slice'] = spaxels_per_slice
+        metadata['Configurations'] = 'All' if configuration_idx is None else configuration_idx
+        metadata['Wavelengths'] = 'All' if wavelength_idx is None else wavelength_idx
+
+
+        # read the file options
+        file_list, sett_list = create_zemax_file_list(which_system=files_opt['which_system'],
+                                                      AO_modes=files_opt['AO_modes'], scales=files_opt['scales'],
+                                                      IFUs=files_opt['IFUs'], grating=files_opt['grating'])
+
+        # Loop over the Zemax files
+        results = []
+        for zemax_file, settings in zip(file_list, sett_list):
+
+            list_results = self.run_analysis(analysis_function=self.analysis_function_raytrace,
+                                             files_dir=files_dir, zemax_file=zemax_file, results_path=results_path,
+                                             results_shapes=results_shapes, results_names=results_names,
+                                             wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
+                                             ignore_vignetting=ignore_vignetting,
+                                             surface=surface, spaxels_per_slice=spaxels_per_slice)
+
+            results.append(list_results)
+
+            # if save_hdf5 == True:
+            #     # Post-Processing the results
+            #     file_name = zemax_file.split('.')[0]
+            #     settings['surface'] = 'DETECTOR' if surface is None else surface
+            #     self.save_hdf5(analysis_name='RMS_WFE', analysis_metadata=metadata, list_results=list_results, results_names=results_names,
+            #                    file_name=file_name, file_settings=settings, results_dir=results_path)
+
+
+        return results
+
+
 
 
 if __name__ == """__main__""":
