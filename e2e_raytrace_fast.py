@@ -151,7 +151,7 @@ if __name__ == """__main__""":
     # [*] This is the bit we have to change when you run the analysis in your system [*]
     sys_mode = 'HARMONI'
     ao_modes = ['NOAO']
-    spaxel_scale = '20x20'
+    spaxel_scale = '4x4'
     spaxels_per_slice = 3       # How many field points per Slice to use
     # gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
     gratings = ['H']

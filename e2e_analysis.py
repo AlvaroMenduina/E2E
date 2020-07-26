@@ -2998,7 +2998,7 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
                 wavelength = system.SystemData.Wavelengths.GetWavelength(wave_idx).Wavelength
 
                 RMS_WFE[i_wave, j_field] = wavelength * 1e3 * rms  # We assume the Wavelength comes in Microns
-                print("Row #%d: Wave %.3f micron | Field #%d -> RMS %.3f" % (irow, wavelength, j_field + 1, rms))
+                # print("Row #%d: Wave %.3f micron | Field #%d -> RMS %.3f" % (irow, wavelength, j_field + 1, rms))
 
                 output = normUnPolData.ReadNextResult()
                 if output[2] == 0:
