@@ -2649,6 +2649,7 @@ class RMS_WFE_Analysis(AnalysisGeneric):
 
         return results
 
+# TODO: probably don't need this anymore
 # Define the Spaxel Sizes [um] for each Spaxel Scale at each Focal Plane
 spaxel_sizes = {}
 spaxel_sizes["60x30"] = {"FPRS": [97.656, 195.313],
@@ -2667,6 +2668,19 @@ spaxel_sizes["4x4"] = {"FPRS": [13.021, 13.021],
                             "PO": [195.313, 390.625],
                             "IFU": [65, 130],
                             "SPEC": [15, 30]}
+
+# {***} Rationale for the AnalysisFast {***}
+# AnalysisGeneric works fine, but it's not very efficient / fast. It is based on looping through Wavelength index
+# and Configuration and running a set of operations for just 1 wavelength / 1 config.
+# At some point, we realized that it could be faster to only loop through configurations and run a set of operations
+# for all available Wavelength indices. For example, calculating the RMS WFE, it's much faster to just add operands
+# for all wavelengths and field points of a given Configuration, update the Merit Function and then read the operands
+
+# For that reason, we created AnalysisFast, a faster version of AnalysisGeneric that only loops over Configurations
+# a whole suite of inherited analysis classes is available. They are very similar to their AnalysisGeneric
+# counterparts, except for the fact that AnalysisGeneric uses array shapes of [N_waves, N_configs, (shape)]
+# while AnalysisFast uses shapes of [N_configs, (shape)], with (shape) typically starting with N_waves,
+# so there's a "flip" one should be aware of
 
 
 class AnalysisFast(object):
@@ -2763,7 +2777,7 @@ class AnalysisFast(object):
 
         # print("\nDynamically creating Global Variables to store results")
         for _name, _shape in zip(results_names, results_shapes):
-            # print("Variable: %s with shape (N_waves, N_configs) + " % _name, _shape)
+            # Notice the change with respect to AnalysisGeneric, here we have N_configs + (shape)
             globals()[_name] = np.empty((N_slices, ) + _shape)
             # print(globals()[_name].shape)
 
@@ -2774,6 +2788,7 @@ class AnalysisFast(object):
 
         start = time()
         print("\nAnalysis Started: [FAST MODE]")
+        # We only loop through configurations, which is much faster!
         for j, config in enumerate(configurations):
 
             # print("Config #%d: " % (config))
@@ -2900,16 +2915,30 @@ class AnalysisFast(object):
         return
 
 
-
 class RMS_WFE_FastAnalysis(AnalysisFast):
     """
-    Ex
+    [Fast Version] of the RMS WFE calculation
     """
 
     @staticmethod
     def analysis_function_rms_wfe(system, wavelength_idx, config, spaxels_per_slice, surface, pupil_sampling):
         """
+        Calculate the RMS WFE for a given Configuration, for an arbitrary number of Field Points and Wavelengths
+        This is how we do it:
 
+        (1) Get the Min and Max field points to normalize the coordinates
+        (2) Sample the Slice from the min and max field points, using spaxels_per_slice points
+        (3) Define the Merit Function. Loop over the Wavelengths, add 1 operand per field points to calculate RMS WFE
+        (4) At the same time, add Chief Rays to the raytrace to get the detector coordinates
+        (5) Read the results both for the Merit Function operands and the Raytrace results
+
+        :param system: the Zemax system
+        :param wavelength_idx: list of the Wavelength indices we want to use
+        :param config: current configuration number
+        :param spaxels_per_slice: how many points per slice to use to calculate the RMS WFE (typically 3)
+        :param surface: the surface number at which we will calculate the RMS WFE
+        :param pupil_sampling: how many points N to use on an N x N grid per pupil quadrant. RWRE operand parameter
+        :return:
         """
         start0 = time()
 
@@ -2925,6 +2954,7 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
         fx_min, fy_min = sysField.GetField(1).X, sysField.GetField(1).Y
         fx_max, fy_max = sysField.GetField(N_fields).X, sysField.GetField(N_fields).Y
 
+        # Note that this assumes Rectangular Normalization, the default in the E2E files.
         X_MAX = np.max([np.abs(sysField.GetField(i + 1).X) for i in range(N_fields)])
         Y_MAX = np.max([np.abs(sysField.GetField(i + 1).Y) for i in range(N_fields)])
 
