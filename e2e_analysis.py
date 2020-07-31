@@ -2,12 +2,12 @@
 
 Performance Analysis for the End-to-End Models
 
-This is the main modules that contains all the stuff needed to
+This is the main module that contains all the stuff needed to
 construct a performance analysis
 
 Author: Alvaro Menduina
 Date Created: March 2020
-Latest version: June 2020
+Latest version: August 2020
 
 """
 
@@ -43,6 +43,7 @@ sha = repo.head.object.hexsha
 # PO: PreOptics, IS: Image Slicer, SL: Slit, DET: Detector
 
 # These are the old April-May values
+# TODO: [***] This should probably go at some point, we no longer analyze the IFS mode
 focal_planes = {}
 focal_planes['IFS'] = {'4x4': {'AB': {'FPRS': 6, 'PO': 41, 'IS': 70, 'SL': 88, 'DET': None},
                                'CD': {'FPRS': 6, 'PO': 41, 'IS': 69, 'SL': 88, 'DET': None},
@@ -62,6 +63,8 @@ focal_planes['IFS'] = {'4x4': {'AB': {'FPRS': 6, 'PO': 41, 'IS': 70, 'SL': 88, '
                                  'GH': {'FPRS': 6, 'PO': 30, 'IS': 58, 'SL': 77, 'DET': None}}}
 
 # Update for June values
+# TODO: [***] This is not very robust. Ideally, we'd like to search for the Image Slicer surface by its Zemax comment
+# but at the moment, the naming on the Zemax files is inconsistent, so this will have to wait
 focal_planes['HARMONI'] = {'4x4': {'AB': {'IS': 96, 'DET': None},
                                    'CD': {'IS': 95, 'DET': None},
                                    'EF': {'IS': 96, 'DET': None},
@@ -79,6 +82,7 @@ focal_planes['HARMONI'] = {'4x4': {'AB': {'IS': 96, 'DET': None},
                                      'EF': {'IS': 85, 'DET': None},
                                      'GH': {'IS': 84, 'DET': None}}
                            }
+
 
 # Taken from Zemax example code
 class PythonStandaloneApplication(object):
@@ -448,8 +452,7 @@ class DiffractionEffects(object):
 
 diffraction = DiffractionEffects()
 
-
-
+# TODO: [***] This should probably go, we no longer use it
 def pixelate_crosstalk_psf(raw_psf, PSF_window, N_points, xt=0.02):
 
     pix_samp = PSF_window / N_points  # microns per PSF point
@@ -468,8 +471,6 @@ def pixelate_crosstalk_psf(raw_psf, PSF_window, N_points, xt=0.02):
     cross_psf = convolve2d(pix_psf, kernel, mode='same')
 
     return cross_psf
-
-
 
 
 def read_hdf5(path_to_file):
@@ -602,6 +603,10 @@ def define_pupil_sampling(r_obsc, N_rays, mode='random'):
         r = np.sqrt(np.random.uniform(low=r_obsc**2, high=1.0, size=N_rays))
         theta = np.random.uniform(low=0.0, high=2 * np.pi, size=N_rays)
         px, py = r * np.cos(theta), r * np.sin(theta)
+
+    else:
+        raise NotImplementedError
+        # TODO: Implemented a different pupil sampling, if needed
 
     return px, py
 
@@ -860,6 +865,7 @@ class AnalysisGeneric(object):
         print("For Wavelength Numbers: ", wavelength_idx)
         print("For Configurations %d -> %d" % (configurations[0], configurations[-1]))
 
+        # Main part of the Analysis. Here we loop over the Wavelengths and Configurations
         start = time()
         print("\nAnalysis Started")
         for k, (wave_idx, wavelength) in enumerate(zip(wavelength_idx, wavelengths)):
@@ -1026,6 +1032,7 @@ class AnalysisGeneric(object):
 
         return
 
+    # TODO: [***] This plot_and_save is deprecated, we shouldn't "post-process" the results in e2e_analysis.py
     def plot_and_save(self, analysis_name, list_results, file_name, file_settings, results_dir, wavelength_idx):
         """
         Semi-"generic" plot and save routine to post-process the analysis results
@@ -1287,6 +1294,9 @@ class AnalysisGeneric(object):
 
 
 class SpotDiagramAnalysis(AnalysisGeneric):
+
+    # NOTE: we stop using this Analysis very early on (might need maintenance) but feel free to copy / adapt
+
     """
     Example of a custom analysis - Spot Diagrams
 
@@ -1422,7 +1432,7 @@ class SpotDiagramAnalysis(AnalysisGeneric):
     def plot_fields(self, xy, wavelengths, wavelength_idx, configuration_idx, fields, surface, file_name, result_path,
                     scale=5, cmap=cm.Reds):
 
-        file_dir = os.path.join(results_path, file_name)
+        file_dir = os.path.join(result_path, file_name)
         spot_dir = os.path.join(file_dir, 'SPOT_DIAGRAM_FIELDS')
         if not os.path.exists(spot_dir):
             os.mkdir(spot_dir)           # If not, create the directory to store results
@@ -1730,6 +1740,12 @@ class RMSSpotAnalysis(AnalysisGeneric):
         plt.savefig(os.path.join(spot_dir, figname))
 
         return
+
+### This are the relevant analyses for the E2E model:
+#   - Ensquared Energy
+#   - FWHM_PSF
+#   - Raytrace
+#   - RMS WFE
 
 class EnsquaredEnergyAnalysis(AnalysisGeneric):
     """
@@ -3010,8 +3026,8 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
                     if vignet_code != 0:
 
                         vignetting_surface = system.LDE.GetSurfaceAt(vignet_code).Comment
-                        print("\nConfig #%d" % (config))
-                        print("Vignetting at surface #%d: %s" % (vignet_code, vignetting_surface))
+                        # print("\nConfig #%d" % (config))
+                        # print("Vignetting at surface #%d: %s" % (vignet_code, vignetting_surface))
 
         normUnPolData.ClearData()
         CastTo(raytrace, 'ISystemTool').Close()

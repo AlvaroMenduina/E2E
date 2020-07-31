@@ -305,7 +305,7 @@ if __name__ == """__main__""":
     # [*] This is the bit we have to change when you run the analysis in your system [*]
     sys_mode = 'HARMONI'
     ao_modes = ['SCAO']
-    spaxel_scale = '4x4'
+    spaxel_scale = '10x10'
     spaxels_per_slice = 3       # How many field points per Slice to use
     pupil_sampling = 4          # N x N grid per pupil quadrant. See Zemax Operand help for RWRE
     gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
@@ -330,6 +330,9 @@ if __name__ == """__main__""":
 
     rms_grating = np.array(rms_grating).T
 
+    # idx = [np.nonzero(rms_grating[:, i])[0] for i in range(len(gratings))]
+    # nonzero_rms = [rms_grating[:, i][idx[i]] for i in range(len(gratings))]
+
     # Box and Whisker plot across all spectral bands
     data = pd.DataFrame(rms_grating, columns=gratings)
 
@@ -341,8 +344,8 @@ if __name__ == """__main__""":
 
     fig_name = "RMS_WFE_DETECTOR_%s_%s_%s" % (spaxel_scale, sys_mode, ao_modes[0])
     analysis_dir = os.path.join(results_path, 'RMS_WFE')
-    if os.path.isfile(os.path.join(analysis_dir, fig_name)):
-        os.remove(os.path.join(analysis_dir, fig_name))
-    fig_box.savefig(os.path.join(analysis_dir, fig_name))
+    # if os.path.isfile(os.path.join(analysis_dir, fig_name)):
+    #     os.remove(os.path.join(analysis_dir, fig_name))
+    # fig_box.savefig(os.path.join(analysis_dir, fig_name))
 
     plt.show()

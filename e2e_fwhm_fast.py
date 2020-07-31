@@ -281,7 +281,7 @@ if __name__ == """__main__""":
     # [*] This is the bit we have to change when you run the analysis in your system [*]
     sys_mode = 'HARMONI'
     ao_modes = ['LTAO']
-    spaxel_scale = '60x30'
+    spaxel_scale = '4x4'
     gratings = ['VIS', 'IZ', 'J', 'IZJ', 'Z_HIGH', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
     # gratings = ['VIS', 'IZ']
     N_rays = 500
