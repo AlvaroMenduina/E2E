@@ -2,13 +2,26 @@
 
 Common Wavelength Range
 
-
 Author: Alvaro Menduina
 Date: July 2020
 
 Description:
 
-XXX
+After John Capone updated the Spectrograph files we noticed that some rays started
+falling outside the active area of the Detector, suggesting the wavelengths defined
+in the E2E Model Zemax files are "optimistic".
+We decided to recalculate the Common Wavelength Range, i.e. the shortest and longest
+wavelengths for which ALL configuration (slices) fall within the active area of the
+detector.
+
+Here's how we do it:
+
+(1) We trace a chief ray for all Field Points of a slice, for all configurations
+    and all wavelengths, up to the Detector plane
+(2) For each wavelength we calculate the maximum and minimum Y (spectral direction)
+    and linearly interpolate Wavelength -> [Min or Max] Spectral coordinate
+(3) We solve for the wavelength that has the Spectral coordinate equal to the
+    max or min detector aperture
 
 """
 
@@ -16,12 +29,7 @@ import os
 import numpy as np
 import e2e_analysis as e2e
 import matplotlib.pyplot as plt
-import matplotlib.tri as tri
 from scipy import interpolate
-from matplotlib.patches import Rectangle
-import pandas as pd
-import seaborn as sns
-from time import time
 
 
 def interpolate_wave(foc_y_coord, wavelengths, limit):

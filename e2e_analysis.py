@@ -3663,14 +3663,35 @@ class FWHM_PSF_FastAnalysis(AnalysisFast):
         return results
 
 
-
 class CommonWavelengthRange(AnalysisFast):
     """
     Calculate the Common Wavelength Range
+
+    At some point we saw that, in some cases, the rays fall outside the active area
+    of the detector (specially for short wavelengths). This means that the wavelengths
+    defined in Zemax are "optimistic" and that we have to re-calculate the
+    Common Wavelength Range
     """
 
     @staticmethod
     def analysis_function_cwr(system, wavelength_idx, config, surface):
+        """
+        To calculate the Common Wavelength Range we will perform a raytrace for
+        all configurations and wavelengths in the E2E Model Zemax file
+
+        We will use the results of the raytrace at the detector plane to interpolate
+        and find the value of the shortest and longest wavelengths for which all slices (configurations)
+        fall within the active area of the detector.
+
+        Here we only run the Raytrace and store the values, we will do the post-processing
+        in another script e2e_common_wave_range.py
+
+        :param system: the Zemax optical system
+        :param wavelength_idx: list of Zemax wavelength indices
+        :param config: current configuration
+        :param surface: Zemax surface number
+        :return:
+        """
 
         # Set Current Configuration
         system.MCE.SetCurrentConfiguration(config)
@@ -3680,9 +3701,7 @@ class CommonWavelengthRange(AnalysisFast):
         N_fields = sysField.NumberOfFields
         N_waves = len(wavelength_idx)
 
-        fx_min, fy_min = sysField.GetField(1).X, sysField.GetField(1).Y
-        fx_max, fy_max = sysField.GetField(N_fields).X, sysField.GetField(N_fields).Y
-
+        # We will trace all 3 available Field Points (the centre and both edges of the slice)
         X_MAX = np.max([np.abs(sysField.GetField(i + 1).X) for i in range(N_fields)])
         Y_MAX = np.max([np.abs(sysField.GetField(i + 1).Y) for i in range(N_fields)])
 
@@ -3690,7 +3709,7 @@ class CommonWavelengthRange(AnalysisFast):
         hy = np.array([sysField.GetField(i + 1).Y / Y_MAX for i in range(N_fields)])
 
         # The Field coordinates for the Object
-        obj_xy = np.array([X_MAX * hx, Y_MAX * hy]).T
+        # obj_xy = np.array([X_MAX * hx, Y_MAX * hy]).T
         foc_xy = np.empty((N_waves, N_fields, 2))
 
         N_rays = N_waves * N_fields
@@ -3720,7 +3739,7 @@ class CommonWavelengthRange(AnalysisFast):
             for j_field, (h_x, h_y) in enumerate(zip(hx, hy)):
 
                 output = normUnPolData.ReadNextResult()
-                if output[2] == 0:
+                if output[2] == 0:      # ignore the vignetting
                     x, y = output[4], output[5]
                     foc_xy[i_wave, j_field, 0] = x
                     foc_xy[i_wave, j_field, 1] = y
@@ -3741,7 +3760,6 @@ class CommonWavelengthRange(AnalysisFast):
         metadata = {}
         metadata['Configurations'] = 'All' if configuration_idx is None else configuration_idx
         metadata['Wavelengths'] = 'All' if wavelength_idx is None else wavelength_idx
-
 
         # read the file options
         file_list, sett_list = create_zemax_file_list(which_system=files_opt['which_system'],
@@ -3770,16 +3788,25 @@ class CommonWavelengthRange(AnalysisFast):
         return results
 
 
-
 class Raytrace_FastAnalysis(AnalysisFast):
     """
-    Ex
+    Raytrace Analysis [Fast]
+    Traces a set of Chief Rays to a given surface (typically the Detector plane)
     """
 
     @staticmethod
     def analysis_function_raytrace(system, wavelength_idx, config, spaxels_per_slice, surface, ignore_vignetting):
         """
+        For a given configuration, trace chief rays for chosen wavelengths and field points (spaxels_per_slice)
+        using a single Raytrace
 
+        :param system: Zemax optical system
+        :param wavelength_idx: list of Zemax wavelength indices we want
+        :param config: current Zemax configuration number
+        :param spaxels_per_slice: how many field points per slice we want to trace
+        :param surface: Zemax surface number we want to trace the rays to
+        :param ignore_vignetting: boolean, whether or not to ignore vignetting
+        :return:
         """
         start0 = time()
 
@@ -3839,7 +3866,7 @@ class Raytrace_FastAnalysis(AnalysisFast):
 
                 output = normUnPolData.ReadNextResult()
                 if ignore_vignetting == False:
-
+                    # We do care about vignetting
                     if output[2] == 0 and output[3] == 0:
                         x, y = output[4], output[5]
                         foc_xy[i_wave, j_field, 0] = x
@@ -3853,11 +3880,12 @@ class Raytrace_FastAnalysis(AnalysisFast):
                         print("Field point #%d : hx=%.4f hy=%.4f | fx=%.4f, fy=%.4f" % (j_field + 1, h_x, h_y, fx, fy))
                         print("Vignetting at surface #%d: %s" % (vignet_code, vignetting_surface))
                 else:
+                    # If we don't care about vignetting (rays falling outside the active area of the detector, for example)
+                    # we add the Raytrace results to the focal coordinates array no matter what
                     if output[2] == 0:
                         x, y = output[4], output[5]
                         foc_xy[i_wave, j_field, 0] = x
                         foc_xy[i_wave, j_field, 1] = y
-
 
         normUnPolData.ClearData()
         CastTo(raytrace, 'ISystemTool').Close()
@@ -3866,14 +3894,16 @@ class Raytrace_FastAnalysis(AnalysisFast):
 
         return [obj_xy, foc_xy]
 
-
     def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
                         configuration_idx=None, surface=None, spaxels_per_slice=3, ignore_vignetting=False,
-                        save_hdf5=True):
+                        save_hdf5=False):
         """
+        We loop over the Zemax files, calculating the Raytrace
+
+        The results will be (1) an OBJECT XY coordinates array of size [N_configs, spaxels_per_slice, 2], and
+        (2) a FOCAL XY coordinates array of size [N_configs, N_waves, spaxels_per_slice, 2], notice the wavelengths!
 
         """
-
 
         results_names = ['OBJ_XY', 'FOC_XY']
         N_waves = 23 if wavelength_idx is None else len(wavelength_idx)
@@ -3884,7 +3914,6 @@ class Raytrace_FastAnalysis(AnalysisFast):
         metadata['Spaxels per slice'] = spaxels_per_slice
         metadata['Configurations'] = 'All' if configuration_idx is None else configuration_idx
         metadata['Wavelengths'] = 'All' if wavelength_idx is None else wavelength_idx
-
 
         # read the file options
         file_list, sett_list = create_zemax_file_list(which_system=files_opt['which_system'],
@@ -3904,17 +3933,14 @@ class Raytrace_FastAnalysis(AnalysisFast):
 
             results.append(list_results)
 
-            # if save_hdf5 == True:
-            #     # Post-Processing the results
-            #     file_name = zemax_file.split('.')[0]
-            #     settings['surface'] = 'DETECTOR' if surface is None else surface
-            #     self.save_hdf5(analysis_name='RMS_WFE', analysis_metadata=metadata, list_results=list_results, results_names=results_names,
-            #                    file_name=file_name, file_settings=settings, results_dir=results_path)
-
+            if save_hdf5 == True:
+                # We save the arrays in HDF5 format alongside the analysis metadata in case we want to look at it later
+                file_name = zemax_file.split('.')[0]
+                settings['surface'] = 'DETECTOR' if surface is None else surface
+                self.save_hdf5(analysis_name='RAYTRACE', analysis_metadata=metadata, list_results=list_results,
+                               results_names=results_names, file_name=file_name, file_settings=settings, results_dir=results_path)
 
         return results
-
-
 
 
 if __name__ == """__main__""":

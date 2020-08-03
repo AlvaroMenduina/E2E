@@ -166,35 +166,6 @@ if __name__ == """__main__""":
         # object_xy.append(obj_xy)
         # focal_xy.append(foc_xy)
 
-    # for i in range(2):
-    #     fig, ax = plt.subplots(1, 1, figsize=(15, 10))
-    #     _foc_xy = foc_xy[i]
-    #
-    #     N_configs = _foc_xy.shape[0]
-    #     N_waves = _foc_xy.shape[1]
-    #     configs = np.arange(1, N_configs + 1)
-    #     colors = cm.Reds(np.linspace(0.5, 0.75, N_waves))
-    #
-    #     # we need to know which Field point is the inner edge of the slit
-    #     # i.e. obj_x ~ 0.0, this varies between odd and even config
-    #     _obj_xy = obj_xy[i]
-    #     obj_x = _obj_xy[:, :, 0]
-    #     # For each configuration we select the field point closer to f_x = 0
-    #     # by sorting the absolute value of the fx coordinates
-    #     edge_field = [np.argsort(np.abs(obj_x[i]))[0] for i in range(N_configs)]
-    #
-    #     for j_wave in range(N_waves):
-    #         x, y = _foc_xy[:, j_wave, :, 0].flatten(), _foc_xy[:, j_wave, :, 1].flatten()
-    #         ax.scatter(x, y, color=colors[j_wave], s=10)
-    #         for k_config in range(N_configs):
-    #             # Mark the inner edge of the slit
-    #             i_edge = edge_field[k_config]
-    #             x_edge, y_edge = _foc_xy[k_config, j_wave, i_edge, 0], _foc_xy[k_config, j_wave, i_edge, 1]
-    #             ax.scatter(x_edge, y_edge, color='black', s=15, facecolors='none')
-    #
-    #             x_c, y_c = _foc_xy[k_config, j_wave, 1, 0], _foc_xy[k_config, j_wave, 1, 1]
-    #             ax.text(x=x_c, y=y_c + 0.5, s='%d' % (k_config + 1))
-
 
     plt.show()
 
