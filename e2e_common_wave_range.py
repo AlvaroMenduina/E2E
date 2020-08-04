@@ -33,12 +33,61 @@ from scipy import interpolate
 
 
 def interpolate_wave(foc_y_coord, wavelengths, limit):
+    """
+    Perform linear interpolation between X: Focal Coodinates Spectral Direction
+    and Y: the Wavelengths
+
+    And use that interpolation to calculate at which Wavelength the focal coordinates
+    exceed the detector aperture (limit):
+    Max or Min wavelength = f_interpol (X = detector aperture)
+
+    :param foc_y_coord: array containing the (max or min) detector spectral coordinates for each wavelength
+    :param wavelengths: array containing the wavelengths
+    :param limit: value of the detector aperture
+    :return:
+    """
     x = foc_y_coord
     y = wavelengths
-    f = interpolate.interp1d(x, y)
-    return f(limit)
+    f_int = interpolate.interp1d(x, y)
+
+    return f_int(limit)
+
 
 def common_wavelength_range(zosapi, sys_mode, ao_modes, spaxel_scale, grating, files_path, results_path):
+    """
+    Calculate the Common Wavelength Range
+
+    For a given spaxel scale and spectral band, we have 4 IFU channels available. There can be some
+    variability on the detector raytrace coordinates so we should calculate the min and max wavelength
+    that works for all IFU channels
+
+    Method:
+        (1) For each IFU, we get the raytrace results at the detector plane.
+        (2) We calculate, for each wavelength, the minimum and maximum Y (spectral) coordinate;
+            i.e. how far up / down the detector each set of slitlets lands.
+        (3) Shorter wavelengths have positive (+) spectral coordinates, longer wavelengths
+            have negative (-) spectral coordinates
+        (4) So to calculate the SHORTEST possible wavelength for an IFU channel we linearly interpolate
+            the wavelengths and the maximum spectral coordinate for each wavelength.
+                ** If for some wavelength the rays fall outside the detector, we use
+                    the interpolation to calculate the wavelength at which we reach the detector boundary
+                ** If none of the rays for the shortest Zemax defined wavelength falls outside
+                    then we say that is the SHORTEST wavelength (no recalculation)
+        (5) For the LONGEST possible wavelength we do the equivalent process, but with the
+            minimum spectral coordinates.
+        (6) We combine the results for each IFU to calculate the SHORTEST wavelength as
+            "the longest of the SHORTEST wavelengths of all 4 IFUs", and the equivalent for
+            the LONGEST wavelength, thus defining the Common Wavelength Range
+
+    :param zosapi: the Zemax API
+    :param sys_mode: [str] the system mode, either 'HARMONI', 'ELT' or 'IFS
+    :param ao_modes: [list] containing the AO mode we want. Only 1 should be used
+    :param spaxel_scale: [str] the spaxel scale, ex. '60x30'
+    :param grating: [str] the spectral band to analyze, ex. 'HK'
+    :param files_path: path to the E2E files to load for the analysis
+    :param results_path: path to save the results
+    :return:
+    """
 
     analysis_dir = os.path.join(results_path, 'CWR')
     print("Analysis Results will be saved in folder: ", analysis_dir)
@@ -57,21 +106,29 @@ def common_wavelength_range(zosapi, sys_mode, ao_modes, spaxel_scale, grating, f
                    'grating': [grating]}
 
         list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options, results_path=results_path,
-                                                wavelength_idx=None, configuration_idx=None,
-                                                surface=None)
+                                                wavelength_idx=None, configuration_idx=None, surface=None)
 
+        # Get the Detector XY coordinates and the Wavelengths
         foc_xy, waves = list_results[0]
         focal_coord.append(foc_xy)
 
         _foc = foc_xy[:, :, :, 1]
+        # Calculate the Maximum and Minimum spectral coordinates Y for each wavelength
         max_foc = np.max(_foc, axis=(0, 2))
         min_foc = np.min(_foc, axis=(0, 2))
         try:
+            # The short wavelengths have (+) positive Y, so we use the Maximum Y coordinates
+            # to interpolate and calculate the SHORTEST wavelength
             short_wave = interpolate_wave(foc_y_coord=max_foc, wavelengths=waves, limit=30.66)
         except ValueError:
+            # We cannot interpolate outside the defined range of wavelengths
+            # So if there is no problem of rays for the shortest wavelength falling outside
+            # the detector area, the interpolation won't work. The shortest Zemax wavelength
+            # is perfectly valid, so no need to interpolate
             short_wave = np.min(waves)
 
         try:
+            # Long wavelengths have (-) negative Y
             long_wave = interpolate_wave(foc_y_coord=min_foc, wavelengths=waves, limit=-30.66)
         except ValueError:
             long_wave = np.max(waves)
@@ -86,6 +143,8 @@ def common_wavelength_range(zosapi, sys_mode, ao_modes, spaxel_scale, grating, f
         short_waves.append(short_wave)
         long_waves.append(long_wave)
 
+    # There should be very little variation between IFU channels, but just for the sake of
+    # consistency, we calculate the SHORTEST wavelength as the longest of the shortest wavelengths
     min_wave = np.max(short_waves)
     max_wave = np.min(long_waves)
     print("\nCommon Wavelength Range: [%.4f, %.4f] microns" % (min_wave, max_wave))
@@ -116,6 +175,7 @@ if __name__ == """__main__""":
     gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
     # gratings = ['VIS']
 
+    # We will save the results in a .txt file 
     file_name = 'Common_Wavelength_Ranges_%s_%s_%s.txt' % (sys_mode, ao_modes[0], spaxel_scale)
     with open(os.path.join(analysis_dir, file_name), 'w') as f:
         f.write('MODE: %s, AO: %s, Spaxel Scale: %s' % (sys_mode, ao_modes[0], spaxel_scale))
