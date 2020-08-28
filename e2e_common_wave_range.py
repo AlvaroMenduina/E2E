@@ -161,8 +161,8 @@ if __name__ == """__main__""":
     # Create a Python Standalone Application
     psa = e2e.PythonStandaloneApplication()
 
-    files_path = os.path.abspath("D:\End to End Model\June_John2020")
-    results_path = os.path.abspath("D:\End to End Model\Results_Report\Mode_LTAO\Scale_20x20")
+    files_path = os.path.abspath("D:\End to End Model\August_2020")
+    results_path = os.path.abspath("D:End to End Model\Results_ReportAugust\Mode_LTAO\Scale_20x20")
     analysis_dir = os.path.join(results_path, 'CWR')
 
     print("Analysis Results will be saved in folder: ", analysis_dir)
@@ -175,7 +175,7 @@ if __name__ == """__main__""":
     gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
     # gratings = ['VIS']
 
-    # We will save the results in a .txt file 
+    # We will save the results in a .txt file
     file_name = 'Common_Wavelength_Ranges_%s_%s_%s.txt' % (sys_mode, ao_modes[0], spaxel_scale)
     with open(os.path.join(analysis_dir, file_name), 'w') as f:
         f.write('MODE: %s, AO: %s, Spaxel Scale: %s' % (sys_mode, ao_modes[0], spaxel_scale))

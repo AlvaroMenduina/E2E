@@ -65,10 +65,10 @@ focal_planes['IFS'] = {'4x4': {'AB': {'FPRS': 6, 'PO': 41, 'IS': 70, 'SL': 88, '
 # Update for June values
 # TODO: [***] This is not very robust. Ideally, we'd like to search for the Image Slicer surface by its Zemax comment
 # but at the moment, the naming on the Zemax files is inconsistent, so this will have to wait
-focal_planes['HARMONI'] = {'4x4': {'AB': {'IS': 96, 'DET': None},
-                                   'CD': {'IS': 95, 'DET': None},
-                                   'EF': {'IS': 96, 'DET': None},
-                                   'GH': {'IS': 95, 'DET': None}},
+focal_planes['HARMONI'] = {'4x4': {'AB': {'IS': 97, 'DET': None},
+                                   'CD': {'IS': 96, 'DET': None},
+                                   'EF': {'IS': 97, 'DET': None},
+                                   'GH': {'IS': 96, 'DET': None}},
                            '10x10': {'AB': {'IS': 92, 'DET': None},
                                      'CD': {'IS': 91, 'DET': None},
                                      'EF': {'IS': 92, 'DET': None},
@@ -2921,7 +2921,8 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
     """
 
     @staticmethod
-    def analysis_function_rms_wfe(system, wavelength_idx, config, spaxels_per_slice, surface, pupil_sampling):
+    def analysis_function_rms_wfe(system, wavelength_idx, config, spaxels_per_slice, surface, pupil_sampling,
+                                  slicer_surface=None):
         """
         Calculate the RMS WFE for a given Configuration, for an arbitrary number of Field Points and Wavelengths
         This is how we do it:
@@ -2944,6 +2945,42 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
 
         # Set Current Configuration
         system.MCE.SetCurrentConfiguration(config)
+
+        ### [TEMPORARY PATCH]
+        if slicer_surface is not None:
+
+            # First of all, we need to find the Surface Number for the IMAGE SLICER
+            N_surfaces = system.LDE.NumberOfSurfaces
+            surface_names = {}      # A dictionary of surface number -> surface comment
+            for k in np.arange(1, N_surfaces):
+                surface_names[k] = system.LDE.GetSurfaceAt(k).Comment
+            # find the Slicer surface number
+            slicer_num = list(surface_names.keys())[list(surface_names.values()).index('Slicer Mirror')]
+            slicer = system.LDE.GetSurfaceAt(slicer_num)
+
+            # Read Current Aperture Settings
+            apt_type = slicer.ApertureData.CurrentType
+            # print("Aperture type: ", apt_type)
+            if apt_type == 4:  # 4 is Rectangular aperture
+                current_apt_sett = slicer.ApertureData.CurrentTypeSettings
+                # print("Current Settings:")
+                x0 = current_apt_sett._S_RectangularAperture.XHalfWidth
+                y0 = current_apt_sett._S_RectangularAperture.YHalfWidth
+                if y0 != 999:
+                    # Change Settings
+                    aperture_settings = slicer.ApertureData.CreateApertureTypeSettings(
+                        constants.SurfaceApertureTypes_RectangularAperture)
+                    aperture_settings._S_RectangularAperture.XHalfWidth = x0
+                    aperture_settings._S_RectangularAperture.YHalfWidth = 999
+                    slicer.ApertureData.ChangeApertureTypeSettings(aperture_settings)
+
+                    current_apt_sett = slicer.ApertureData.CurrentTypeSettings
+                    print("Changing aperture of surface: ", slicer.Comment)
+                    print("New Settings:")
+                    print("X_HalfWidth = %.2f" % current_apt_sett._S_RectangularAperture.XHalfWidth)
+                    print("Y_HalfWidth = %.2f" % current_apt_sett._S_RectangularAperture.YHalfWidth)
+
+        ### [TEMPORARY PATCH]
 
         # Get the Field Points for that configuration
         sysField = system.SystemData.Fields
@@ -3046,6 +3083,10 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
                 RMS_WFE[i_wave, j_field] = wavelength * 1e3 * rms  # We assume the Wavelength comes in Microns
                 # print("Row #%d: Wave %.3f micron | Field #%d -> RMS %.3f" % (irow, wavelength, j_field + 1, rms))
 
+                # If for one the AO modes we get an RMS value of 0.0, print the data so we can double check the Zemax file
+                if RMS_WFE[i_wave, j_field] == 0.0:
+                    print("\nConfig #%d | Wave #%d | Field #%d" % (config, wave_idx, j_field + 1))
+
                 output = normUnPolData.ReadNextResult()
                 if output[2] == 0:
                     x, y = output[4], output[5]
@@ -3081,7 +3122,7 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
 
     def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
                         configuration_idx=None, surface=None, spaxels_per_slice=3, pupil_sampling=4,
-                        save_hdf5=True):
+                        save_hdf5=True, remove_slicer_aperture=False):
         """
         Function that loops over a given set of E2E model Zemax files, running the analysis
         defined by self.analysis_function_rms_wfe
@@ -3118,12 +3159,21 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
         results = []
         for zemax_file, settings in zip(file_list, sett_list):
 
+            if remove_slicer_aperture == True:
+                system = settings['system']
+                spaxel_scale = settings['scale']
+                ifu = settings['ifu']
+                # We need to know what is the Surface Number for the Image Slicer in the Zemax file
+                slicer_surface = focal_planes[system][spaxel_scale][ifu]['IS']
+            else:
+                slicer_surface = None
+
             list_results = self.run_analysis(analysis_function=self.analysis_function_rms_wfe,
                                              files_dir=files_dir, zemax_file=zemax_file, results_path=results_path,
                                              results_shapes=results_shapes, results_names=results_names,
                                              wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
                                              surface=surface, spaxels_per_slice=spaxels_per_slice,
-                                             pupil_sampling=pupil_sampling)
+                                             pupil_sampling=pupil_sampling, slicer_surface=slicer_surface)
 
             results.append(list_results)
 

@@ -196,7 +196,7 @@ def detector_rms_wfe(zosapi, sys_mode, ao_modes, spaxel_scale, spaxels_per_slice
         list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options, results_path=results_path,
                                                 wavelength_idx=None, configuration_idx=None,
                                                 surface=None, spaxels_per_slice=spaxels_per_slice,
-                                                pupil_sampling=pupil_sampling)
+                                                pupil_sampling=pupil_sampling, remove_slicer_aperture=True)
 
         rms_wfe, obj_xy, foc_xy, waves = list_results[0]    # Only 1 item on the list, no Monte Carlo files
 
@@ -304,14 +304,14 @@ if __name__ == """__main__""":
 
     # [*] This is the bit we have to change when you run the analysis in your system [*]
     sys_mode = 'HARMONI'
-    ao_modes = ['LTAO']
-    spaxel_scale = '4x4'
+    ao_modes = ['NOAO']
+    spaxel_scale = '60x30'
     spaxels_per_slice = 3       # How many field points per Slice to use
     pupil_sampling = 4          # N x N grid per pupil quadrant. See Zemax Operand help for RWRE
-    gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
-    # gratings = ['H']
-    files_path = os.path.abspath("D:\End to End Model\June_John2020")
-    results_path = os.path.abspath("D:\End to End Model\Results_Report\Mode_LTAO\Scale_%s" % spaxel_scale)
+    gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_SHORT', 'K_LONG']
+    # gratings = ['VIS']
+    files_path = os.path.abspath("D:\End to End Model\August_2020")
+    results_path = os.path.abspath("D:\End to End Model\Results_ReportAugust\Mode_NOAO\Scale_%s" % spaxel_scale)
     # [*] This is the bit we have to change when you run the analysis in your system [*]
 
     # First we want to justify the choice of Pupil Sampling.
@@ -330,17 +330,28 @@ if __name__ == """__main__""":
 
     rms_grating = np.array(rms_grating).T
 
-    # idx = [np.nonzero(rms_grating[:, i])[0] for i in range(len(gratings))]
-    # nonzero_rms = [rms_grating[:, i][idx[i]] for i in range(len(gratings))]
-
-    # Box and Whisker plot across all spectral bands
     data = pd.DataFrame(rms_grating, columns=gratings)
 
+    # Violinplot
+    fig_violin, ax = plt.subplots(1, 1, figsize=(10, 6))
+    sns.violinplot(data=data, ax=ax, hue_order=gratings, palette=sns.color_palette("Reds"))
+    ax.set_ylabel(r'RMS WFE [nm]')
+    ax.set_title(r'RMS WFE Detector | %s scale | %s %s' % (spaxel_scale, sys_mode, ao_modes[0]))
+    # ax.set_ylim([0, 500])
+    ax.set_ylim(bottom=0)
+
+    fig_name = "RMS_WFE_DETECTOR_%s_%s_%s_violin" % (spaxel_scale, sys_mode, ao_modes[0])
+    analysis_dir = os.path.join(results_path, 'RMS_WFE')
+    if os.path.isfile(os.path.join(analysis_dir, fig_name)):
+        os.remove(os.path.join(analysis_dir, fig_name))
+    fig_violin.savefig(os.path.join(analysis_dir, fig_name))
+
+    # Box and Whisker plot across all spectral bands
     fig_box, ax = plt.subplots(1, 1, figsize=(10, 6))
     sns.boxplot(data=data, ax=ax, hue_order=gratings, palette=sns.color_palette("Reds"))
     ax.set_ylabel(r'RMS WFE [nm]')
     ax.set_title(r'RMS WFE Detector | %s scale | %s %s' % (spaxel_scale, sys_mode, ao_modes[0]))
-    # ax.set_ylim([0, 500])
+    ax.set_ylim(bottom=0)
 
     fig_name = "RMS_WFE_DETECTOR_%s_%s_%s" % (spaxel_scale, sys_mode, ao_modes[0])
     analysis_dir = os.path.join(results_path, 'RMS_WFE')
