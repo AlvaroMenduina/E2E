@@ -194,8 +194,8 @@ if __name__ == """__main__""":
 
     # [*] This is the bit we have to change when you run the analysis in your system [*]
     sys_mode = 'HARMONI'
-    ao_modes = ['LTAO']
-    spaxel_scale = '10x10'
+    ao_modes = ['NOAO']
+    spaxel_scale = '20x20'
     gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
     # gratings = ['H']
     N_rays = 500
@@ -204,14 +204,14 @@ if __name__ == """__main__""":
     # [*] This is the bit we have to change when you run the analysis in your system [*]
 
 
-    # for grating in gratings:
-    #     detector_ensquared_energy(zosapi=psa, sys_mode=sys_mode, ao_modes=ao_modes, spaxel_scale=spaxel_scale,
-    #                               grating=grating, N_rays=N_rays, files_path=files_path, results_path=results_path,
-    #                               box_size=2.0)
-    # plt.show()
-
     for grating in gratings:
-        ensquared_spaxel_size(zosapi=psa, sys_mode=sys_mode, ao_modes=ao_modes, spaxel_scale=spaxel_scale,
-                                  grating=grating, N_rays=N_rays, files_path=files_path, results_path=results_path)
+        detector_ensquared_energy(zosapi=psa, sys_mode=sys_mode, ao_modes=ao_modes, spaxel_scale=spaxel_scale,
+                                  grating=grating, N_rays=N_rays, files_path=files_path, results_path=results_path,
+                                  box_size=2.0)
+    plt.show()
+
+    # for grating in gratings:
+    #     ensquared_spaxel_size(zosapi=psa, sys_mode=sys_mode, ao_modes=ao_modes, spaxel_scale=spaxel_scale,
+    #                               grating=grating, N_rays=N_rays, files_path=files_path, results_path=results_path)
 
     plt.show()

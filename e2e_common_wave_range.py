@@ -162,7 +162,7 @@ if __name__ == """__main__""":
     psa = e2e.PythonStandaloneApplication()
 
     files_path = os.path.abspath("D:\End to End Model\August_2020")
-    results_path = os.path.abspath("D:End to End Model\Results_ReportAugust\Mode_LTAO\Scale_20x20")
+    results_path = os.path.abspath("D:End to End Model\Results_ReportAugust\Mode_NOAO\Scale_4x4")
     analysis_dir = os.path.join(results_path, 'CWR')
 
     print("Analysis Results will be saved in folder: ", analysis_dir)
@@ -170,8 +170,8 @@ if __name__ == """__main__""":
         os.mkdir(analysis_dir)
 
     sys_mode = 'HARMONI'
-    ao_modes = ['LTAO']
-    spaxel_scale = '20x20'
+    ao_modes = ['NOAO']
+    spaxel_scale = '4x4'
     gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
     # gratings = ['VIS']
 

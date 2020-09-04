@@ -265,6 +265,21 @@ def fwhm_all_gratings(zosapi, sys_mode, ao_modes, spaxel_scale, grating_list, N_
         os.remove(os.path.join(analysis_dir, fig_name))
     fig_box.savefig(os.path.join(analysis_dir, fig_name))
 
+    fig_violin, (ax1, ax2) = plt.subplots(2, 1, figsize=(16, 8))
+    sns.violinplot(data=data_x, ax=ax1, hue_order=grating_list, palette=sns.color_palette("Blues"))
+    sns.violinplot(data=data_y, ax=ax2, hue_order=grating_list, palette=sns.color_palette("Reds"))
+    # ax1.set_ylim([min_val, max_valx])
+    # ax2.set_ylim([min_val, max_valy])
+    ax1.set_title('FWHM Along Slice [X] Detector Plane | %s scale | %s %s' % (spaxel_scale, sys_mode, ao_modes[0]))
+    ax2.set_title('FWHM Across Slice [Y] Image Slicer | %s scale | %s %s' % (spaxel_scale, sys_mode, ao_modes[0]))
+    ax1.set_ylabel('FWHM [$\mu$m]')
+    ax2.set_ylabel('FWHM [$\mu$m]')
+
+    fig_name = "FWHM_PSF_%s_MODE_%s_%s_violin" % (spaxel_scale, sys_mode, ao_modes[0])
+    if os.path.isfile(os.path.join(analysis_dir, fig_name)):
+        os.remove(os.path.join(analysis_dir, fig_name))
+    fig_violin.savefig(os.path.join(analysis_dir, fig_name))
+
     stats = [minX, meanX, maxX, minY, meanY, maxY]
 
     return fx_grating, fy_grating, stats
@@ -280,16 +295,16 @@ if __name__ == """__main__""":
 
     # [*] This is the bit we have to change when you run the analysis in your system [*]
     sys_mode = 'HARMONI'
-    ao_modes = ['LTAO']
-    spaxel_scale = '4x4'
+    ao_modes = ['NOAO']
+    spaxel_scale = '60x30'
     gratings = ['VIS', 'IZ', 'J', 'IZJ', 'Z_HIGH', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
     # gratings = ['VIS', 'IZ']
     N_rays = 500
     N_waves = 5
     N_configs = 2  # Jump every N_configs, not the total
 
-    files_path = os.path.abspath("D:\End to End Model\June_John2020")
-    results_path = os.path.abspath("D:\End to End Model\Results_Report\Mode_LTAO\Scale_%s" % spaxel_scale)
+    files_path = os.path.abspath("D:\End to End Model\August_2020")
+    results_path = os.path.abspath("D:\End to End Model\Results_ReportAugust\Mode_NOAO\Scale_%s" % spaxel_scale)
     # [*] This is the bit we have to change when you run the analysis in your system [*]
 
 

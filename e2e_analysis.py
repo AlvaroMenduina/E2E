@@ -3535,6 +3535,18 @@ class FWHM_PSF_FastAnalysis(AnalysisFast):
         # Set Current Configuration
         system.MCE.SetCurrentConfiguration(config)
 
+        # First of all, we need to find the Surface Number for the IMAGE SLICER "Image Plane"
+        N_surfaces = system.LDE.NumberOfSurfaces
+        surface_names = {}  # A dictionary of surface number -> surface comment
+        for k in np.arange(1, N_surfaces):
+            surface_names[k] = system.LDE.GetSurfaceAt(k).Comment
+        # find the Slicer surface number
+        try:
+            slicer_num = list(surface_names.keys())[list(surface_names.values()).index('Image Plane')]
+        except ValueError:
+            slicer_num = list(surface_names.keys())[list(surface_names.values()).index('Image plane')]
+        slicer_surface = slicer_num
+
         # Get the Field Points for that configuration
         sysField = system.SystemData.Fields
         N_fields = sysField.NumberOfFields
