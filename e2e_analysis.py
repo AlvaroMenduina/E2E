@@ -1282,7 +1282,7 @@ class RaytraceAnalysis(AnalysisGeneric):
         # Loop over the fields to get the Normalization Radius
         r_max = np.max([np.sqrt(sysField.GetField(i).X ** 2 +
                                 sysField.GetField(i).Y ** 2) for i in np.arange(1, N_fields + 1)])
-        
+
         # Watch Out! This assumes that Field #1 is at the edge of the slice and that Field #3 is at the other edge
         fx_min, fy_min = sysField.GetField(1).X, sysField.GetField(1).Y
         fx_max, fy_max = sysField.GetField(3).X, sysField.GetField(3).Y
@@ -1578,7 +1578,7 @@ class RMS_WFE_Analysis(AnalysisGeneric):
         N_fields = sysField.NumberOfFields
         wavelength = system.SystemData.Wavelengths.GetWavelength(wave_idx).Wavelength
 
-        # # Loop over the fields to get the Normalization Radius
+        # # Loop over the fields to get the Normalization Radius (if Radial)
         # r_max = np.max([np.sqrt(sysField.GetField(i).X ** 2 +
         #                         sysField.GetField(i).Y ** 2) for i in np.arange(1, N_fields + 1)])
         # print(r_max)
@@ -1588,6 +1588,7 @@ class RMS_WFE_Analysis(AnalysisGeneric):
         fx_min, fy_min = sysField.GetField(1).X, sysField.GetField(1).Y
         fx_max, fy_max = sysField.GetField(3).X, sysField.GetField(3).Y
 
+        # This assumes Rectangular Normalization
         X_MAX = np.max([np.abs(sysField.GetField(i + 1).X) for i in range(3)])
         Y_MAX = np.max([np.abs(sysField.GetField(i + 1).Y) for i in range(3)])
 
@@ -1619,7 +1620,7 @@ class RMS_WFE_Analysis(AnalysisGeneric):
         op.ChangeType(constants.MeritOperandType_CONF)
         op.GetOperandCell(constants.MeritColumn_Param1).Value = config
 
-        # Pupil Sampling
+        # Pupil Sampling (4 means an 8x8 pupil grid)
         samp = 4
         wfe_op = constants.MeritOperandType_RWRE
 
@@ -1706,11 +1707,6 @@ class RMS_WFE_Analysis(AnalysisGeneric):
         # global_xy = global_xyz[:, :2]
 
         return [RMS_WFE, obj_xy, foc_xy, global_xy]
-
-    # The following functions depend on how you want to post-process your analysis results
-    # For example, "loop_over_files" automatically runs the RMS WFE analysis across all Zemax files
-    # and uses "flip_rms" to reorder the Configurations -> Slice #,
-    # and "plot_RMS_WFE_maps" to save the figures
 
     def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
                         configuration_idx=None, surface=None, spaxels_per_slice=51):
@@ -1801,7 +1797,9 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
         # Set Current Configuration
         system.MCE.SetCurrentConfiguration(config)
 
-        ### [TEMPORARY PATCH]
+        # [WARNING]: for the 4x4 spaxel scale we noticed that a significant fraction of the rays get vignetted at the slicer
+        # this introduces a bias in the RMS WFE calculation. To avoid this, we modify the Image Slicer aperture definition
+        # so that all rays get through.
         if remove_slicer is True:
 
             # First of all, we need to find the Surface Number for the IMAGE SLICER
@@ -1834,8 +1832,6 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
                     print("New Settings:")
                     print("X_HalfWidth = %.2f" % current_apt_sett._S_RectangularAperture.XHalfWidth)
                     print("Y_HalfWidth = %.2f" % current_apt_sett._S_RectangularAperture.YHalfWidth)
-
-        ### [TEMPORARY PATCH]
 
         # Get the Field Points for that configuration
         sysField = system.SystemData.Fields
@@ -1970,11 +1966,6 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
 
         return [RMS_WFE, obj_xy, foc_xy]
 
-    # The following functions depend on how you want to post-process your analysis results
-    # For example, "loop_over_files" automatically runs the RMS WFE analysis across all Zemax files
-    # and uses "flip_rms" to reorder the Configurations -> Slice #,
-    # and "plot_RMS_WFE_maps" to save the figures
-
     def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
                         configuration_idx=None, surface=None, spaxels_per_slice=3, pupil_sampling=4,
                         save_hdf5=True, remove_slicer_aperture=False):
@@ -2030,8 +2021,8 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
                 self.save_hdf5(analysis_name='RMS_WFE', analysis_metadata=metadata, list_results=list_results, results_names=results_names,
                                file_name=file_name, file_settings=settings, results_dir=results_path)
 
-
         return results
+
 
 class EnsquaredEnergyFastAnalysis(AnalysisFast):
     """
@@ -2042,12 +2033,9 @@ class EnsquaredEnergyFastAnalysis(AnalysisFast):
     """
 
     @staticmethod
-    def analysis_function_ensquared(system, wavelength_idx, config, px, py, box_size):
+    def analysis_function_ensquared(system, wavelength_idx, surface, config, px, py, box_size):
         """
-        Calculation of the Ensquared Energy
-
-
-
+        Calculation of the Geometric Ensquared Energy
 
         :param system: the Zemax optical system
         :param wavelength_idx: list of the Zemax Wavelength indices we want to use
@@ -2282,18 +2270,18 @@ class EnsquaredEnergyFastAnalysis(AnalysisFast):
             print("Using %d rays" % N_rays)
 
             list_results = self.run_analysis(analysis_function=self.analysis_function_ensquared,
-                                        files_dir=files_dir, zemax_file=zemax_file, results_path=results_path,
-                                        results_shapes=results_shapes, results_names=results_names,
-                                        wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
-                                        px=px, py=py, box_size=box_size)
+                                             files_dir=files_dir, zemax_file=zemax_file, results_path=results_path,
+                                             results_shapes=results_shapes, results_names=results_names,
+                                             wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
+                                             px=px, py=py, box_size=box_size)
 
             results.append(list_results)
 
             # Post-Processing the results
             file_name = zemax_file.split('.')[0]
             settings['surface'] = 'DETECTOR'
-            self.save_hdf5(analysis_name='ENSQ_ENERG', analysis_metadata=metadata, list_results=list_results, results_names=results_names,
-                           file_name=file_name, file_settings=settings, results_dir=results_path)
+            self.save_hdf5(analysis_name='ENSQ_ENERG', analysis_metadata=metadata, list_results=list_results,
+                           results_names=results_names, file_name=file_name, file_settings=settings, results_dir=results_path)
 
         return results
 
@@ -2696,8 +2684,6 @@ class CommonWavelengthRange(AnalysisFast):
                            file_name=file_name, file_settings=settings, results_dir=results_path)
 
         return results
-
-
 
 # ==================================================================================================================== #
 #                            OLD ANALYSES - Feel free to copy / use as inspiration if needed                           #
