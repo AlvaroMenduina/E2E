@@ -77,11 +77,8 @@ def fwhm_psf_detector(zosapi, sys_mode, ao_modes, spaxel_scale, grating, N_confi
     for ifu_section in ifu_sections:
         options = {'which_system': sys_mode, 'AO_modes': ao_modes, 'scales': [spaxel_scale], 'IFUs': [ifu_section],
                    'grating': [grating]}
-        focal_plane = e2e.focal_planes[sys_mode][spaxel_scale][ifu_section]['DET']
-
         list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options, results_path=results_path,
-                                                wavelength_idx=wavelength_idx, configuration_idx=configs,
-                                                surface=focal_plane, N_rays=N_rays)
+                                                wavelength_idx=wavelength_idx, configuration_idx=configs, N_rays=N_rays)
 
         # Only 1 list, no Monte Carlo
         fwhm, obj_xy, foc_xy, wavelengths = list_results[0]
@@ -296,7 +293,7 @@ if __name__ == """__main__""":
     # [*] This is the bit we have to change when you run the analysis in your system [*]
     sys_mode = 'HARMONI'
     ao_modes = ['NOAO']
-    spaxel_scale = '60x30'
+    spaxel_scale = '4x4'
     gratings = ['VIS', 'IZ', 'J', 'IZJ', 'Z_HIGH', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
     # gratings = ['VIS', 'IZ']
     N_rays = 500
