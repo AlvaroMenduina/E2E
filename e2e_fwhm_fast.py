@@ -8,6 +8,8 @@ We account for diffraction effects by calculating the Airy pattern,
 adding Image Slicer effects and then convolving all that with a
 geometric PSF (estimated using raytracing data)
 
+For more details regarding the methodology, see FWHM_PSF_FastAnalysis in e2e_analys.py
+
 Author: Alvaro Menduina (Oxford)
 Date: September 2020
 """
@@ -47,9 +49,15 @@ def draw_detector_boundary(ax):
 
 def fwhm_psf_detector(zosapi, sys_mode, ao_modes, spaxel_scale, grating, N_configs, N_waves, N_rays, files_path, results_path):
     """
-    Calculate the FWHM PSF at the Detector Plane (including diffraction effects)
+    Calculate the FWHM PSF (including diffraction effects)
     in both directions, acrosss and along the Slices
     for a given spaxel scale and grating configuration, across all 4 IFU channels
+
+    Because of the nature of HARMONI, we split the calculation for the X and Y direction
+    The FWHM X is calculated at the Detector plane, in the spatial direction
+    The FWHM Y is calculated at the Image Slicer plane, across the slices
+
+    Details on the methodology can be found in e2e_analysis.py, at "FWHM_PSF_FastAnalysis"
 
     :param zosapi: the Zemax API
     :param sys_mode: [str] the system mode, either 'HARMONI', 'ELT' or 'IFS
@@ -74,7 +82,7 @@ def fwhm_psf_detector(zosapi, sys_mode, ao_modes, spaxel_scale, grating, N_confi
     ifu_sections = ['AB', 'CD', 'EF', 'GH']
 
     wavelength_idx = np.linspace(1, 23, N_waves).astype(int)
-    # Select the config index. Using all of them takes forever
+    # Select a subsect of configuration indices. Using all of them takes forever...
     # We jump every N_configs
     odd_configs = np.arange(1, 76, 2)[::N_configs]
     even_configs = odd_configs + 1
@@ -102,12 +110,12 @@ def fwhm_psf_detector(zosapi, sys_mode, ao_modes, spaxel_scale, grating, N_confi
     fx = np.array(fx)
     fy = np.array(fy)
 
-    # (1) Detector plane
+    # (1) DETECTOR plane plot
     # Get a separate figure for each direction X and Y
     for fwhm, label in zip([fx, fy], ['FWHM_X', 'FWHM_Y']):
         min_fwhm = np.nanmin(fwhm)
         max_fwhm = np.nanmax(fwhm)
-        # (1) DETECTOR plane plot
+
         fig, axes = plt.subplots(2, 2, figsize=(10, 10))
         # Loop over the IFU channels: AB, CD, EF, GH
         for i in range(2):
@@ -118,11 +126,16 @@ def fwhm_psf_detector(zosapi, sys_mode, ao_modes, spaxel_scale, grating, N_confi
                 _foc_xy = focal_coord[k]
                 _fwhm = fwhm[k]
 
+                # If we don't split the results between "even" and "odd" configurations (A and B paths),
+                # pyplot will triangulate over the gap between the two detector footprints (where there is no data)
+                # so it's better to split the results and generate 2 separate triangulations
                 x_odd, y_odd = _foc_xy[:N//2, :, 0].flatten(), _foc_xy[:N//2, :, 1].flatten()
                 x_even, y_even = _foc_xy[N//2:, :, 0].flatten(), _foc_xy[N//2:, :, 1].flatten()
                 triang_odd = tri.Triangulation(x_odd, y_odd)
                 triang_even = tri.Triangulation(x_even, y_even)
 
+                # This thing here makes sure that we don't get weird triangles if the detector footprint
+                # has a funny shape (with a lot of spectrograph smile)
                 min_circle_ratio = .05
                 mask_odd = tri.TriAnalyzer(triang_odd).get_flat_tri_mask(min_circle_ratio)
                 triang_odd.set_mask(mask_odd)
@@ -134,6 +147,7 @@ def fwhm_psf_detector(zosapi, sys_mode, ao_modes, spaxel_scale, grating, N_confi
                 tpc_even = ax.tripcolor(triang_even, _fwhm[N//2:].flatten(), shading='flat', cmap='jet')
                 tpc_even.set_clim(vmin=min_fwhm, vmax=max_fwhm)
 
+                # Draw the boundaries of the detector for reference
                 draw_detector_boundary(ax)
 
                 axis_label = 'Detector'
@@ -190,7 +204,7 @@ def fwhm_psf_detector(zosapi, sys_mode, ao_modes, spaxel_scale, grating, N_confi
     #             os.remove(os.path.join(save_path, fig_name))
     #         fig_obj.savefig(os.path.join(save_path, fig_name))
 
-    return fx, fy, focal_coord
+    return fx, fy
 
 
 def fwhm_all_gratings(zosapi, sys_mode, ao_modes, spaxel_scale, grating_list, N_configs, N_waves, N_rays,
@@ -200,16 +214,16 @@ def fwhm_all_gratings(zosapi, sys_mode, ao_modes, spaxel_scale, grating_list, N_
 
     We use the results to create a figure showing the FWHM for all gratings
 
-    :param zosapi:
-    :param sys_mode:
-    :param ao_modes:
-    :param spaxel_scale:
-    :param grating_list:
-    :param N_configs:
-    :param N_waves:
-    :param N_rays:
-    :param files_path:
-    :param results_path:
+    :param zosapi: the Zemax API
+    :param sys_mode: [str] the system mode, either 'HARMONI', 'ELT' or 'IFS
+    :param ao_modes: [list] containing the AO mode we want. Only 1 should be used
+    :param spaxel_scale: [str] the spaxel scale, ex. '60x30'
+    :param grating_list: [list] containing the names of the gratings we want to analyse
+    :param N_configs: how many configurations to skip (N_configs = 2, we jump every 2 configurations)
+    :param N_waves: how many wavelengths to analyse (typically 5 - 7)
+    :param N_rays: how many rays to trace to estimate the geometric PSF (typically 500 - 100)
+    :param files_path: path to the Zemax files
+    :param results_path: path where the results will be stored
     :return:
     """
 
@@ -219,6 +233,7 @@ def fwhm_all_gratings(zosapi, sys_mode, ao_modes, spaxel_scale, grating_list, N_
     if not os.path.exists(analysis_dir):
         os.mkdir(analysis_dir)
 
+    # We will calculate the FWHM in X and Y separately
     fx_grating, fy_grating = [], []
     minX, minY = [], []
     meanX, meanY = [], []
@@ -227,11 +242,14 @@ def fwhm_all_gratings(zosapi, sys_mode, ao_modes, spaxel_scale, grating_list, N_
     # Loop over all available gratings and calculate the FWHM in each case
     for grating in grating_list:
 
-        fx, fy, focal_coord = fwhm_psf_detector(zosapi=zosapi, sys_mode=sys_mode, ao_modes=ao_modes,
-                                                spaxel_scale=spaxel_scale, grating=grating,
-                                                N_configs=N_configs, N_waves=N_waves, N_rays=N_rays,
-                                                files_path=files_path, results_path=results_path)
+        fx, fy = fwhm_psf_detector(zosapi=zosapi, sys_mode=sys_mode, ao_modes=ao_modes, spaxel_scale=spaxel_scale,
+                                   grating=grating, N_configs=N_configs, N_waves=N_waves, N_rays=N_rays,
+                                   files_path=files_path, results_path=results_path)
 
+        fx_grating.append(fx.flatten())
+        fy_grating.append(fy.flatten())
+
+        # Print some information as we go, to make sure the results look reasonable
         print("\nFor Spectral band %s" % grating)
         print("FWHM PSF results: ")
         min_x, min_y = np.nanmin(fx), np.nanmin(fy)
@@ -246,12 +264,10 @@ def fwhm_all_gratings(zosapi, sys_mode, ao_modes, spaxel_scale, grating_list, N_
         meanY.append(mean_y)
         maxY.append(max_y)
 
-        fx_grating.append(fx.flatten())
-        fy_grating.append(fy.flatten())
-
     fx_grating = np.array(fx_grating).T
     fy_grating = np.array(fy_grating).T
 
+    # Create a Pandas dataframe to facilitate using Seaborn to generate the plots
     data_x = pd.DataFrame(fx_grating, columns=grating_list)
     data_y = pd.DataFrame(fy_grating, columns=grating_list)
 
@@ -259,8 +275,6 @@ def fwhm_all_gratings(zosapi, sys_mode, ao_modes, spaxel_scale, grating_list, N_
     fig_box, (ax1, ax2) = plt.subplots(2, 1, figsize=(16, 8))
     sns.boxplot(data=data_x, ax=ax1, hue_order=grating_list, palette=sns.color_palette("Blues"))
     sns.boxplot(data=data_y, ax=ax2, hue_order=grating_list, palette=sns.color_palette("Reds"))
-    # ax1.set_ylim([min_val, max_valx])
-    # ax2.set_ylim([min_val, max_valy])
     ax1.set_title('FWHM Along Slice [X] Detector Plane | %s scale | %s %s' % (spaxel_scale, sys_mode, ao_modes[0]))
     ax2.set_title('FWHM Across Slice [Y] Image Slicer | %s scale | %s %s' % (spaxel_scale, sys_mode, ao_modes[0]))
     ax1.set_ylabel('FWHM [$\mu$m]')
@@ -275,8 +289,6 @@ def fwhm_all_gratings(zosapi, sys_mode, ao_modes, spaxel_scale, grating_list, N_
     fig_violin, (ax1, ax2) = plt.subplots(2, 1, figsize=(16, 8))
     sns.violinplot(data=data_x, ax=ax1, hue_order=grating_list, palette=sns.color_palette("Blues"))
     sns.violinplot(data=data_y, ax=ax2, hue_order=grating_list, palette=sns.color_palette("Reds"))
-    # ax1.set_ylim([min_val, max_valx])
-    # ax2.set_ylim([min_val, max_valy])
     ax1.set_title('FWHM Along Slice [X] Detector Plane | %s scale | %s %s' % (spaxel_scale, sys_mode, ao_modes[0]))
     ax2.set_title('FWHM Across Slice [Y] Image Slicer | %s scale | %s %s' % (spaxel_scale, sys_mode, ao_modes[0]))
     ax1.set_ylabel('FWHM [$\mu$m]')
@@ -305,9 +317,9 @@ if __name__ == """__main__""":
     ao_modes = ['LTAO']
     spaxel_scale = '60x30'
     gratings = ['VIS', 'IZ', 'J', 'IZJ', 'Z_HIGH', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
-    N_rays = 500
-    N_waves = 5
-    N_configs = 2  # Jump every N_configs, not the total number
+    N_rays = 500    # how many rays to trace to estimate the geometric PSF
+    N_waves = 5     # how many Wavelengths to analyse
+    N_configs = 2   # Jump every N_configs, not the total number
 
     files_path = os.path.abspath("D:\End to End Model\August_2020")
     results_path = os.path.abspath("D:\End to End Model\Results_ReportAugust\Mode_%s\Scale_%s" % (ao_modes[0], spaxel_scale))
