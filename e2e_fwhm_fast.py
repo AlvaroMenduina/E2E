@@ -1,5 +1,15 @@
 """"
+Script to calculate the FWHM of the PSF in X and Y directions
 
+The X FWHM is calculated at the Detector plane in spatial direction
+The Y FWHM is calculated at the Image Slicer plane across the slices
+
+We account for diffraction effects by calculating the Airy pattern,
+adding Image Slicer effects and then convolving all that with a
+geometric PSF (estimated using raytracing data)
+
+Author: Alvaro Menduina (Oxford)
+Date: September 2020
 """
 
 import os
@@ -11,6 +21,7 @@ from matplotlib.patches import Rectangle
 import pandas as pd
 import seaborn as sns
 
+
 def draw_detector_boundary(ax):
     """
     Draw a rectangle on the RMS WFE plots
@@ -18,7 +29,7 @@ def draw_detector_boundary(ax):
 
     Assuming detectors with 4096 pixels, and 3 mm gap in between
     15 micron pixels
-    :param ax:
+    :param ax: the pyplot axis from the figure
     :return:
     """
 
@@ -187,6 +198,7 @@ def fwhm_all_gratings(zosapi, sys_mode, ao_modes, spaxel_scale, grating_list, N_
     """
     Run the FWHM PSF analysis across all spectral bands
 
+    We use the results to create a figure showing the FWHM for all gratings
 
     :param zosapi:
     :param sys_mode:
@@ -212,6 +224,7 @@ def fwhm_all_gratings(zosapi, sys_mode, ao_modes, spaxel_scale, grating_list, N_
     meanX, meanY = [], []
     maxX, maxY = [], []
 
+    # Loop over all available gratings and calculate the FWHM in each case
     for grating in grating_list:
 
         fx, fy, focal_coord = fwhm_psf_detector(zosapi=zosapi, sys_mode=sys_mode, ao_modes=ao_modes,
@@ -242,11 +255,7 @@ def fwhm_all_gratings(zosapi, sys_mode, ao_modes, spaxel_scale, grating_list, N_
     data_x = pd.DataFrame(fx_grating, columns=grating_list)
     data_y = pd.DataFrame(fy_grating, columns=grating_list)
 
-    # max_val = np.round(max(np.max(fx_grating), np.max(fy_grating))) + 2
-    max_valx = np.round(np.nanmax(fx_grating)) + 2
-    max_valy = np.round(np.nanmax(fy_grating)) + 5
-    min_val = np.floor(min(np.nanmin(fx_grating), np.nanmin(fy_grating))) - 2
-
+    # Box plot, showing the main characteristics of the distribution (median, Q1, Q3, inter-quartile range...)
     fig_box, (ax1, ax2) = plt.subplots(2, 1, figsize=(16, 8))
     sns.boxplot(data=data_x, ax=ax1, hue_order=grating_list, palette=sns.color_palette("Blues"))
     sns.boxplot(data=data_y, ax=ax2, hue_order=grating_list, palette=sns.color_palette("Reds"))
@@ -262,6 +271,7 @@ def fwhm_all_gratings(zosapi, sys_mode, ao_modes, spaxel_scale, grating_list, N_
         os.remove(os.path.join(analysis_dir, fig_name))
     fig_box.savefig(os.path.join(analysis_dir, fig_name))
 
+    # Also show a "violin" plot to get an idea of the distribution
     fig_violin, (ax1, ax2) = plt.subplots(2, 1, figsize=(16, 8))
     sns.violinplot(data=data_x, ax=ax1, hue_order=grating_list, palette=sns.color_palette("Blues"))
     sns.violinplot(data=data_y, ax=ax2, hue_order=grating_list, palette=sns.color_palette("Reds"))
@@ -292,18 +302,16 @@ if __name__ == """__main__""":
 
     # [*] This is the bit we have to change when you run the analysis in your system [*]
     sys_mode = 'HARMONI'
-    ao_modes = ['NOAO']
-    spaxel_scale = '4x4'
+    ao_modes = ['LTAO']
+    spaxel_scale = '60x30'
     gratings = ['VIS', 'IZ', 'J', 'IZJ', 'Z_HIGH', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
-    # gratings = ['VIS', 'IZ']
     N_rays = 500
     N_waves = 5
-    N_configs = 2  # Jump every N_configs, not the total
+    N_configs = 2  # Jump every N_configs, not the total number
 
     files_path = os.path.abspath("D:\End to End Model\August_2020")
-    results_path = os.path.abspath("D:\End to End Model\Results_ReportAugust\Mode_NOAO\Scale_%s" % spaxel_scale)
+    results_path = os.path.abspath("D:\End to End Model\Results_ReportAugust\Mode_%s\Scale_%s" % (ao_modes[0], spaxel_scale))
     # [*] This is the bit we have to change when you run the analysis in your system [*]
-
 
     fx, fy, stats = fwhm_all_gratings(zosapi=psa, sys_mode=sys_mode, ao_modes=ao_modes,
                                       spaxel_scale=spaxel_scale, grating_list=gratings,

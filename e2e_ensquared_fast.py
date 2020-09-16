@@ -200,7 +200,7 @@ if __name__ == """__main__""":
     # gratings = ['H']
     N_rays = 500
     files_path = os.path.abspath("D:\End to End Model\August_2020")
-    results_path = os.path.abspath("D:\End to End Model\Results_ReportAugust\Mode_NOAO\Scale_%s" % spaxel_scale)
+    results_path = os.path.abspath("D:\End to End Model\Results_ReportAugust\Mode_%s\Scale_%s" % (ao_modes[0], spaxel_scale))
     # [*] This is the bit we have to change when you run the analysis in your system [*]
 
 
