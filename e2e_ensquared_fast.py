@@ -5,6 +5,7 @@
 
 Author: Alvaro Menduina
 Date: July 2020
+Latest version: September 2020
 
 Description:
 With this script we calculate the Ensquared Energy at the detector plane
@@ -79,7 +80,7 @@ def detector_ensquared_energy(zosapi, sys_mode, ao_modes, spaxel_scale, grating,
         triang_odd = tri.Triangulation(x_odd, y_odd)
         triang_even = tri.Triangulation(x_even, y_even)
 
-        #Remove the flat triangles at the detector edges that appear because of the field curvature
+        # Remove the flat triangles at the detector edges that appear because of the field curvature
         min_circle_ratio = .05
         mask_odd = tri.TriAnalyzer(triang_odd).get_flat_tri_mask(min_circle_ratio)
         triang_odd.set_mask(mask_odd)
@@ -196,22 +197,22 @@ if __name__ == """__main__""":
     sys_mode = 'HARMONI'
     ao_modes = ['NOAO']
     spaxel_scale = '20x20'
-    gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
+    gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_SHORT', 'K_LONG']
     # gratings = ['H']
     N_rays = 500
     files_path = os.path.abspath("D:\End to End Model\August_2020")
     results_path = os.path.abspath("D:\End to End Model\Results_ReportAugust\Mode_%s\Scale_%s" % (ao_modes[0], spaxel_scale))
     # [*] This is the bit we have to change when you run the analysis in your system [*]
 
+    # for grating in gratings:
+    #
+    #     detector_ensquared_energy(zosapi=psa, sys_mode=sys_mode, ao_modes=ao_modes, spaxel_scale=spaxel_scale,
+    #                               grating=grating, N_rays=N_rays, files_path=files_path, results_path=results_path,
+    #                               box_size=2.0)
+    # plt.show()
 
     for grating in gratings:
-        detector_ensquared_energy(zosapi=psa, sys_mode=sys_mode, ao_modes=ao_modes, spaxel_scale=spaxel_scale,
-                                  grating=grating, N_rays=N_rays, files_path=files_path, results_path=results_path,
-                                  box_size=2.0)
-    plt.show()
-
-    # for grating in gratings:
-    #     ensquared_spaxel_size(zosapi=psa, sys_mode=sys_mode, ao_modes=ao_modes, spaxel_scale=spaxel_scale,
-    #                               grating=grating, N_rays=N_rays, files_path=files_path, results_path=results_path)
+        ensquared_spaxel_size(zosapi=psa, sys_mode=sys_mode, ao_modes=ao_modes, spaxel_scale=spaxel_scale,
+                                  grating=grating, N_rays=N_rays, files_path=files_path, results_path=results_path)
 
     plt.show()
