@@ -195,10 +195,10 @@ if __name__ == """__main__""":
 
     # [*] This is the bit we have to change when you run the analysis in your system [*]
     sys_mode = 'HARMONI'
-    ao_modes = ['SCAO']
-    spaxel_scale = '10x10'
-    gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_SHORT', 'K_LONG']
-    # gratings = ['H']
+    ao_modes = ['NOAO']
+    spaxel_scale = '20x20'
+    # gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_SHORT', 'K_LONG']
+    gratings = ['H']
     N_rays = 500
     files_path = os.path.abspath("D:\End to End Model\August_2020")
     results_path = os.path.abspath("D:\End to End Model\Results_ReportAugust\Mode_%s\Scale_%s" % (ao_modes[0], spaxel_scale))

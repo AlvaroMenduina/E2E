@@ -2215,24 +2215,42 @@ class EnsquaredEnergyFastAnalysis(AnalysisFast):
             # print(ensq)
             EE[i_wave] = ensq * 0.98
 
+        # SHOW THIS in the methodology
+
         # fig, axes = plt.subplots(2, N_waves)
         # colors = cm.Reds(np.linspace(0.5, 1, N_waves))
         # for j in range(N_waves):
         #     ax1 = axes[0][j]
-        #     ax1.scatter(slicer_xy[j, :, 0], slicer_xy[j, :, 1], s=3, color=colors[j])
-        #     ax1.scatter(sli_foc_xy[j, 0], sli_foc_xy[j, 1], s=3, color='black')
         #     scy = sli_foc_xy[j, 1]
+        #     scx = sli_foc_xy[j, 0]
         #     ax1.axhline(y=scy + 1.0 * box_size / 2, color='black', linestyle='--')
         #     ax1.axhline(y=scy - 1.0 * box_size / 2, color='black', linestyle='--')
+        #     ax1.scatter(slicer_xy[j, :, 0], slicer_xy[j, :, 1], s=3, color=colors[j])
+        #     ax1.scatter(sli_foc_xy[j, 0], sli_foc_xy[j, 1], s=3, color='black')
         #     wavelength = system.SystemData.Wavelengths.GetWavelength(wavelength_idx[j]).Wavelength
-        #     ax1.set_title("%.3f $\mu$m" % wavelength)
+        #     ax1.set_title("IMG SLI | %.3f $\mu$m" % wavelength)
+        #     ax1.set_aspect('equal')
+        #     ax1.get_yaxis().set_visible(False)
+        #     ax1.get_xaxis().set_visible(False)
+        #
+        #     p = 1.2
+        #     ax1.set_xlim([scx - p * box_size / 2, scx + p * box_size / 2])
+        #     ax1.set_ylim([scy - p * box_size / 2, scy + p * box_size / 2])
         #
         #     ax2 = axes[1][j]
         #     dcx = det_foc_xy[j, 0]
+        #     dcy = det_foc_xy[j, 1]
         #     ax2.scatter(detector_xy[j, :, 0], detector_xy[j, :, 1], s=3, color=colors[j])
         #     ax2.scatter(det_foc_xy[j, 0], det_foc_xy[j, 1], s=3, color='black')
         #     ax2.axvline(x=dcx + det_pix * box_size / 2, color='black', linestyle='--')
         #     ax2.axvline(x=dcx - det_pix * box_size / 2, color='black', linestyle='--')
+        #     ax2.set_title("DET | %.3f $\mu$m" % wavelength)
+        #     ax2.set_aspect('equal')
+        #     ax2.get_yaxis().set_visible(False)
+        #     ax2.get_xaxis().set_visible(False)
+        #     ax2.set_xlim([dcx - p * det_pix * box_size / 2, dcx + p * det_pix * box_size / 2])
+        #     ax2.set_ylim([dcy - p * det_pix * box_size / 2, dcy + p * det_pix * box_size / 2])
+        #
         #
         # plt.show()
 
@@ -2339,13 +2357,14 @@ class FWHM_PSF_FastAnalysis(AnalysisFast):
         # print('FWHM time: %.3f sec for Gaussian fit:' % time_gauss)
 
         # fig, (ax1, ax2) = plt.subplots(1, 2)
-        # img1 = ax1.imshow(psf_geo, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
+        # img1 = ax1.imshow(psf_geo, extent=[xmin, xmax, ymin, ymax], cmap='plasma', origin='lower')
+        # ax1.scatter(x, y, s=1, color='white', alpha=0.5)
         # plt.colorbar(img1, ax=ax1, orientation='horizontal')
         # ax1.set_xlabel(r'X [mm]')
         # ax1.set_ylabel(r'Y [mm]')
         # ax1.set_title(r'Geometric PSF estimate | Surface: %s' % surface)
         #
-        # img2 = ax2.imshow(psf_diffr, extent=[xmin, xmax, ymin, ymax], cmap='bwr', origin='lower')
+        # img2 = ax2.imshow(psf_diffr, extent=[xmin, xmax, ymin, ymax], cmap='plasma', origin='lower')
         # plt.colorbar(img2, ax=ax2, orientation='horizontal')
         # ax2.set_xlabel(r'X [mm]')
         # ax2.set_ylabel(r'Y [mm]')
