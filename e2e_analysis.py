@@ -1766,6 +1766,177 @@ class RMS_WFE_Analysis(AnalysisGeneric):
         return results
 
 
+class WavefrontsAnalysis(AnalysisFast):
+
+    @staticmethod
+    def analysis_function_wavefronts(system, wavelength_idx, config, surface, sampling, remove_slicer=False):
+
+
+        # Set Current Configuration
+        system.MCE.SetCurrentConfiguration(config)
+
+        # [WARNING]: for the 4x4 spaxel scale we noticed that a significant fraction of the rays get vignetted at the slicer
+        # this introduces a bias in the RMS WFE calculation. To avoid this, we modify the Image Slicer aperture definition
+        # so that all rays get through.
+        if remove_slicer is True:
+
+            # First of all, we need to find the Surface Number for the IMAGE SLICER
+            N_surfaces = system.LDE.NumberOfSurfaces
+            surface_names = {}      # A dictionary of surface number -> surface comment
+            for k in np.arange(1, N_surfaces):
+                surface_names[k] = system.LDE.GetSurfaceAt(k).Comment
+            # find the Slicer surface number
+            slicer_num = list(surface_names.keys())[list(surface_names.values()).index('Slicer Mirror')]
+            slicer = system.LDE.GetSurfaceAt(slicer_num)
+
+            # Read Current Aperture Settings
+            apt_type = slicer.ApertureData.CurrentType
+            # print("Aperture type: ", apt_type)
+            if apt_type == 4:  # 4 is Rectangular aperture
+                current_apt_sett = slicer.ApertureData.CurrentTypeSettings
+                # print("Current Settings:")
+                x0 = current_apt_sett._S_RectangularAperture.XHalfWidth
+                y0 = current_apt_sett._S_RectangularAperture.YHalfWidth
+                if y0 != 999:
+                    # Change Settings
+                    aperture_settings = slicer.ApertureData.CreateApertureTypeSettings(
+                        constants.SurfaceApertureTypes_RectangularAperture)
+                    aperture_settings._S_RectangularAperture.XHalfWidth = x0
+                    aperture_settings._S_RectangularAperture.YHalfWidth = 999
+                    slicer.ApertureData.ChangeApertureTypeSettings(aperture_settings)
+
+                    current_apt_sett = slicer.ApertureData.CurrentTypeSettings
+                    print("Changing aperture of surface: ", slicer.Comment)
+                    print("New Settings:")
+                    print("X_HalfWidth = %.2f" % current_apt_sett._S_RectangularAperture.XHalfWidth)
+                    print("Y_HalfWidth = %.2f" % current_apt_sett._S_RectangularAperture.YHalfWidth)
+
+        # Get the Field Points for that configuration
+        sysField = system.SystemData.Fields
+        N_fields = sysField.NumberOfFields
+        sysWave = system.SystemData.Wavelengths
+        N_waves = len(wavelength_idx)
+        N_rays = N_waves * 1
+
+        # Get the Field Point at the centre of the Slice
+        fx, fy = sysField.GetField(2).X, sysField.GetField(2).Y
+
+        # Note that this assumes Rectangular Normalization, the default in the E2E files.
+        X_MAX = np.max([np.abs(sysField.GetField(i + 1).X) for i in range(N_fields)])
+        Y_MAX = np.max([np.abs(sysField.GetField(i + 1).Y) for i in range(N_fields)])
+
+        # Normalized field coordinates (hx, hy)
+        hx, hy = fx / X_MAX, fy / Y_MAX
+
+        # The Field coordinates for the Object
+        obj_xy = np.array([fx, fy])
+        # RMS_WFE = np.empty((N_waves, spaxels_per_slice))
+        foc_xy = np.empty((N_waves, 2))
+
+        N_surfaces = system.LDE.NumberOfSurfaces
+
+        # check pupil sampling
+        samps = {'32x32': constants.SampleSizes_S_32x32,
+                 '64x64': constants.SampleSizes_S_64x64,
+                 '128x128': constants.SampleSizes_S_128x128,
+                 '256x256': constants.SampleSizes_S_256x256,
+                 '1024x1024': constants.SampleSizes_S_1024x1024,
+                 '2048x2048': constants.SampleSizes_S_2048x2048,
+                 '4096x4096': constants.SampleSizes_S_4096x4096,
+                 '8192x8192': constants.SampleSizes_S_8192x8192,
+                 '16384x16384': constants.SampleSizes_S_16384x16384}
+        if sampling not in samps:
+            ValueError('sampling must be one of the following: ' +
+                       ', '.join(samps.keys()))
+
+        # iterate through wavelengths
+        for j, wave_idx in enumerate(wavelength_idx):
+
+            # set next wavelength
+            wavelength = system.SystemData.Wavelengths.GetWavelength(wave_idx).Wavelength
+
+            # open analysis
+            awfe = system.Analyses.New_Analysis(constants.AnalysisIDM_WavefrontMap)
+            settings = awfe.GetSettings()
+            csettings = CastTo(settings, 'IAS_WavefrontMap')
+
+            # setup analysis
+            csettings.Surface.SetSurfaceNumber(N_surfaces)
+            csettings.Wavelength.SetWavelengthNumber(wave_idx)  # always changing wave 1
+            csettings.Rotation = constants.Rotations_Rotate_0
+            csettings.Sampling = samps[sampling]
+            csettings.Polarization = constants.Polarizations_None
+            csettings.ReferenceToPrimary = False  # True --> lateral color
+            csettings.UseExitPupil = False
+            csettings.RemoveTilt = True  # True --> ref. to centroid
+            csettings.Subaperture_X = 0.
+            csettings.Subaperture_Y = 0.
+            csettings.Subaperture_R = 1.
+
+            # change field position
+            csettings.Field.SetFieldNumber(2)
+
+            # run analysis
+            awfe.ApplyAndWaitForCompletion()
+
+            # get results
+            results = awfe.GetResults()
+            cresults = CastTo(results, 'IAR_')
+            data = np.array(cresults.GetDataGrid(0).Values)
+            ptv_zos = float(cresults.HeaderData.Lines[2].split('=')[1].split(' ')[1])
+            rms_zos = float(cresults.HeaderData.Lines[2].split('=')[-1].split(' ')[1])
+            mdata = data - np.nanmean(data)
+            rms_wfe = np.sqrt(np.nanmean(mdata * mdata))
+            rms_wfe_nm = rms_wfe * wavelength * 1e3
+            print(ptv_zos, rms_zos)
+
+            plt.figure()
+            plt.imshow(data, cmap='jet', origin='lower')
+            plt.title(r'Wave: %.3f $\mu$m, Slice #%d | RMS: %.3f $\lambda$ (%.1f nm)' % (wavelength, config, rms_wfe, rms_wfe_nm))
+            plt.colorbar()
+            plt.show()
+
+        return [data, foc_xy]
+
+    def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
+                        configuration_idx=None, surface=None, sampling=1024,
+                        save_hdf5=True, remove_slicer_aperture=True):
+
+
+        # XXX
+        results_names = ['WAVEFRONT', 'FOC_XY']
+
+        N_waves = 23 if wavelength_idx is None else len(wavelength_idx)
+        # we need to give the shapes of each array to self.run_analysis
+        results_shapes = [(N_waves, sampling, sampling,), (N_waves, 2)]
+        sampling_str = '%sx%s' % (sampling, sampling)
+
+        metadata = {}
+        metadata['Sampling'] = sampling
+        metadata['Configurations'] = 'All' if configuration_idx is None else configuration_idx
+        metadata['Wavelengths'] = 'All' if wavelength_idx is None else wavelength_idx
+
+
+        # read the file options
+        file_list, sett_list = create_zemax_file_list(which_system=files_opt['which_system'],
+                                                      AO_modes=files_opt['AO_modes'], scales=files_opt['scales'],
+                                                      IFUs=files_opt['IFUs'], grating=files_opt['grating'])
+
+        # Loop over the Zemax files
+        results = []
+        for zemax_file, settings in zip(file_list, sett_list):
+
+            list_results = self.run_analysis(analysis_function=self.analysis_function_wavefronts,
+                                             files_dir=files_dir, zemax_file=zemax_file, results_path=results_path,
+                                             results_shapes=results_shapes, results_names=results_names,
+                                             wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
+                                             surface=surface, sampling=sampling_str, remove_slicer=remove_slicer_aperture)
+
+            results.append(list_results)
+
+        return results
+
+
 class RMS_WFE_FastAnalysis(AnalysisFast):
     """
     [Fast Version] of the RMS WFE calculation
