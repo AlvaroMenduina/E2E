@@ -1840,6 +1840,7 @@ class WavefrontsAnalysis(AnalysisFast):
                  '64x64': constants.SampleSizes_S_64x64,
                  '128x128': constants.SampleSizes_S_128x128,
                  '256x256': constants.SampleSizes_S_256x256,
+                 '512x512': constants.SampleSizes_S_512x512,
                  '1024x1024': constants.SampleSizes_S_1024x1024,
                  '2048x2048': constants.SampleSizes_S_2048x2048,
                  '4096x4096': constants.SampleSizes_S_4096x4096,
@@ -1888,13 +1889,16 @@ class WavefrontsAnalysis(AnalysisFast):
             mdata = data - np.nanmean(data)
             rms_wfe = np.sqrt(np.nanmean(mdata * mdata))
             rms_wfe_nm = rms_wfe * wavelength * 1e3
-            print(ptv_zos, rms_zos)
+            # print(ptv_zos, rms_zos)
 
-            plt.figure()
-            plt.imshow(data, cmap='jet', origin='lower')
-            plt.title(r'Wave: %.3f $\mu$m, Slice #%d | RMS: %.3f $\lambda$ (%.1f nm)' % (wavelength, config, rms_wfe, rms_wfe_nm))
-            plt.colorbar()
-            plt.show()
+            # plt.figure()
+            # plt.imshow(data, cmap='jet', origin='lower')
+            # plt.title(r'Wave: %.3f $\mu$m, Slice #%d | RMS: %.3f $\lambda$ (%.1f nm)' % (wavelength, config, rms_wfe, rms_wfe_nm))
+            # plt.colorbar()
+            # plt.show()
+
+        # close analysis
+        awfe.Close()
 
         return [data, foc_xy]
 
