@@ -2479,6 +2479,197 @@ class EnsquaredEnergyFastAnalysis(AnalysisFast):
         return results
 
 
+class PSFDynamic(AnalysisFast):
+    """
+
+    """
+
+    def calculate_fwhm(self, surface, xy_data, PSF_window, N_points, spaxel_scale, wavelength):
+
+        # (1) Calculate the Geometric PSF
+        x, y = xy_data[:, 0], xy_data[:, 1]
+        cent_x, cent_y = np.mean(x), np.mean(y)
+
+        std_x, std_y = np.std(x), np.std(y)
+        bandwidth = min(std_x, std_y)
+        kde = KernelDensity(kernel='gaussian', bandwidth=bandwidth).fit(xy_data)
+
+        # define a grid to compute the PSF
+        xmin, xmax = cent_x - PSF_window/2/1000, cent_x + PSF_window/2/1000
+        ymin, ymax = cent_y - PSF_window/2/1000, cent_y + PSF_window/2/1000
+        x_grid = np.linspace(xmin, xmax, N_points)
+        y_grid = np.linspace(ymin, ymax, N_points)
+        xx_grid, yy_grid = np.meshgrid(x_grid, y_grid)
+        xy_grid = np.vstack([xx_grid.ravel(), yy_grid.ravel()]).T
+        log_scores = kde.score_samples(xy_grid)
+
+        psf_geo = np.exp(log_scores)
+        psf_geo /= np.max(psf_geo)
+        psf_geo = psf_geo.reshape(xx_grid.shape)
+
+        # (2) Calculate the Diffraction PSF
+        psf_diffr = diffraction.add_diffraction(surface=surface, psf_geo=psf_geo, PSF_window=PSF_window,
+                                                scale_mas=spaxel_scale, wavelength=wavelength)
+
+        # collapse the PSF in X to get a Y profile
+        psf_y = np.sum(psf_diffr, axis=1)
+        psf_y /= np.max(psf_y)
+
+        plt.figure()
+        plt.imshow(psf_diffr, cmap='plasma', extent=[xmin, xmax, ymin, ymax])
+        plt.colorbar()
+
+        # the X coordinate at which the PSF has the peak
+        i_peak = np.argwhere(psf_diffr == 1.0)[0, 0]
+        y_profile = psf_diffr[i_peak, :]
+
+        plt.figure()
+        plt.plot(psf_y, y_grid)
+        # plt.plot(y_grid, y_profile)
+        plt.show()
+
+        return
+
+    def analysis_function_dynamic(self, system, wavelength_idx, surface, config, px, py, spaxel_scale, N_points):
+
+        # Set Current Configuration
+        system.MCE.SetCurrentConfiguration(config)
+
+        # First of all, we need to find the Surface Number for the IMAGE SLICER "Image Plane"
+        N_surfaces = system.LDE.NumberOfSurfaces
+        surface_names = {}  # A dictionary of surface number -> surface comment
+        for k in np.arange(1, N_surfaces):
+            surface_names[k] = system.LDE.GetSurfaceAt(k).Comment
+        # find the Slicer surface number
+        try:
+            slicer_num = list(surface_names.keys())[list(surface_names.values()).index('Image Plane')]
+        except ValueError:
+            slicer_num = list(surface_names.keys())[list(surface_names.values()).index('Image plane')]
+        slicer_surface = slicer_num
+
+        # Get the Field Points for that configuration
+        sysField = system.SystemData.Fields
+        N_fields = sysField.NumberOfFields
+        N_waves = len(wavelength_idx)
+
+        X_MAX = np.max([np.abs(sysField.GetField(i + 1).X) for i in range(N_fields)])
+        Y_MAX = np.max([np.abs(sysField.GetField(i + 1).Y) for i in range(N_fields)])
+
+        # Use the Field Point at the centre of the Slice
+        fx, fy = sysField.GetField(2).X, sysField.GetField(2).Y
+        hx, hy = fx / X_MAX, fy / Y_MAX  # Normalized field coordinates (hx, hy)
+        obj_xy = np.array([fx, fy])
+
+        N_pupil = px.shape[0]   # Number of rays in the Pupil for a given field point and wavelength
+        N_rays = N_waves * N_pupil
+
+        FWHM = np.zeros((N_waves, 2))
+        foc_xy = np.zeros((N_waves, 2))
+
+        slicer_xy = np.empty((N_waves, N_pupil, 2))
+        slicer_xy[:] = np.nan
+        detector_xy = np.empty((N_waves, N_pupil, 2))
+        detector_xy[:] = np.nan
+
+        # (1) Run the raytrace up to the IMAGE SLICER
+        raytrace = system.Tools.OpenBatchRayTrace()
+        # remember to specify the surface to which you are tracing!
+        rays_slicer = raytrace.CreateNormUnpol(N_rays, constants.RaysType_Real, slicer_surface)
+
+        # Loop over all wavelengths
+        for i_wave, wave_idx in enumerate(wavelength_idx):
+
+            for (p_x, p_y) in zip(px, py):  # Add the ray to the RayTrace
+                rays_slicer.AddRay(wave_idx, hx, hy, p_x, p_y, constants.OPDMode_None)
+
+        CastTo(raytrace, 'ISystemTool').RunAndWaitForCompletion()
+        rays_slicer.StartReadingResults()
+        checksum_slicer = 0
+        for k in range(N_rays):  # Get Raytrace results at the Image Slicer
+            i_wave = k // N_pupil
+            j_pupil = k % N_pupil
+            # print(i_wave, j_pupil)
+            output = rays_slicer.ReadNextResult()
+            if output[2] == 0:
+                slicer_xy[i_wave, j_pupil, 0] = output[4]
+                slicer_xy[i_wave, j_pupil, 1] = output[5]
+                checksum_slicer += 1
+        if checksum_slicer < N_rays:
+            raise ValueError('Some rays were lost before the Image Slicer')
+
+        rays_slicer.ClearData()
+
+        # FWHM
+
+        windows = {4.0: [5000, 200], 60.0: [500, 50]}
+        win_slicer = windows[spaxel_scale][0]
+        win_detect = windows[spaxel_scale][1]
+        if config == 1:
+            print("Sampling the Image Slicer plane with %d points: %.3f microns / point" % (N_points, (win_slicer / N_points)))
+
+
+        for i_wave, wave_idx in enumerate(wavelength_idx):
+
+            xy_data_slicer = slicer_xy[i_wave]
+            wavelength = system.SystemData.Wavelengths.GetWavelength(wave_idx).Wavelength
+            self.calculate_fwhm(surface='IS', xy_data=xy_data_slicer, PSF_window=win_slicer,
+                                                               N_points=N_points, spaxel_scale=spaxel_scale,
+                                                               wavelength=wavelength)
+
+            # xy_data_detector = detector_xy[i_wave]
+            # fwhm_x_det, fwhm_y_det = self.calculate_fwhm(surface='DET', xy_data=xy_data_detector, PSF_window=win_detect,
+            #                                              N_points=N_points, spaxel_scale=spaxel_scale,
+            #                                              wavelength=wavelength)
+            #
+            # # plt.show()
+            #
+            # foc_xy[i_wave] = [np.mean(xy_data_detector[:, 0]), np.mean(xy_data_detector[:, 1])]
+            #
+            # FWHM[i_wave] = [fwhm_x_det, fwhm_y_slicer]
+            #
+            # if config == 1:
+            #     print("%.3f microns" % wavelength)
+            #     print("FWHM in X [Detector]: %.1f microns | in Y [Image Slicer]: %.2f microns " % (fwhm_x_det, fwhm_y_slicer))
+            #
+        return []
+
+    def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
+                        configuration_idx=None, N_rays=500, N_points=50):
+        """
+
+        """
+
+        # We want the result to produce as output: the RMS WFE array, and the RayTrace at both Object and Focal plane
+        results_names = ['FWHM', 'OBJ_XY', 'FOC_XY']
+        # we need to give the shapes of each array to self.run_analysis
+        N_waves = 23 if wavelength_idx is None else len(wavelength_idx)
+        results_shapes = [(N_waves, 2,), (2,), (N_waves, 2,)]
+
+        px, py = define_pupil_sampling(r_obsc=0.2841, N_rays=N_rays, mode='random')
+        print("Using %d rays" % N_rays)
+
+        # read the file options
+        file_list, sett_list = create_zemax_file_list(which_system=files_opt['which_system'], AO_modes=files_opt['AO_modes'],
+                                           scales=files_opt['scales'], IFUs=files_opt['IFUs'], grating=files_opt['grating'])
+
+        results = []
+        for zemax_file, settings in zip(file_list, sett_list):
+
+            # Clear the Cache for the Airy Pattern function
+            airy_and_slicer.cache_clear()
+
+            mas_dict = {'4x4': 4.0, '10x10': 10.0, '20x20': 20.0, '60x30': 60.0}
+            spaxel_scale = mas_dict[settings['scale']]
+
+            list_results = self.run_analysis(analysis_function=self.analysis_function_dynamic,
+                                             files_dir=files_dir, zemax_file=zemax_file, results_path=results_path,
+                                             results_shapes=results_shapes, results_names=results_names,
+                                             wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
+                                             px=px, py=py, spaxel_scale=spaxel_scale, N_points=N_points)
+            results.append(list_results)
+
+        return results
+
 class FWHM_PSF_FastAnalysis(AnalysisFast):
     """
 
