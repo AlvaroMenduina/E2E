@@ -18,6 +18,10 @@ import zernike as zern
 import pandas as pd
 import seaborn as sns
 
+# import psf
+# import utils
+# import calibration
+
 
 class ZernikeFit(object):
     """
@@ -148,8 +152,9 @@ def wavefronts(zosapi, sys_mode, ao_modes, spaxel_scale, grating, wavelength_idx
                    'grating': [grating]}
 
         list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options, results_path=results_path,
-                                                wavelength_idx=[wavelength_idx], configuration_idx=config_idx,
-                                                surface=None, sampling=sampling, remove_slicer_aperture=True)
+                                                wavelength_idx=[wavelength_idx], configuration_idx=None,
+                                                surface=None, sampling=sampling,
+                                                coef_path=results_path, remove_slicer_aperture=True)
 
         wavefront, foc_xy, waves = list_results[0]  # Only 1 item on the list, no Monte Carlo files
         rms_maps.append(wavefront)
@@ -157,7 +162,7 @@ def wavefronts(zosapi, sys_mode, ao_modes, spaxel_scale, grating, wavelength_idx
     return rms_maps, waves
 
 ## Parameters ##
-N_levels = 5
+N_levels = 4
 N_paths = 4
 N_config = 76
 N_points = N_paths * N_config
@@ -177,7 +182,7 @@ if __name__ == """__main__""":
     sampling = 128
     # gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_SHORT', 'K_LONG']
     gratings = ['H']
-    files_path = os.path.abspath("D:\End to End Model\August_2020")
+    files_path = os.path.abspath("D:\End to End Model\Wavefronts")
     results_path = os.path.abspath("D:\End to End Model\Wavefronts")
     # [*] This is the bit we have to change when you run the analysis in your system [*]
 
@@ -220,8 +225,7 @@ if __name__ == """__main__""":
     plt.show()
 
     # Fit the Wavefront maps to Zernike polynomials
-
-    zernike_fit = ZernikeFit(N_PIX=sampling, N_levels=4)
+    zernike_fit = ZernikeFit(N_PIX=sampling, N_levels=N_levels)
 
     N_zern = zernike_fit.N_zern
     coefs = np.zeros((N_points, N_zern))
@@ -314,4 +318,61 @@ if __name__ == """__main__""":
     plt.scatter(coefs[76:2*76, 3], coefs[76:2*76, 5], s=5, color='red')
     plt.scatter(coefs[2*76:3*76, 3], coefs[2*76:3*76, 5], s=5, color='green')
     plt.show()
+
+    # ================================================================================================================ #
+    #                                Machine Learning calibration
+    # ================================================================================================================ #
+    #
+    # ### PARAMETERS ###
+    #
+    # # PSF bits
+    # N_PIX = 256  # pixels for the Fourier arrays
+    # pix = 30  # pixels to crop the PSF images
+    # WAVE = 1.5  # microns | reference wavelength
+    # SPAX = 4.0  # mas | spaxel scale
+    # RHO_APER = utils.rho_spaxel_scale(spaxel_scale=SPAX, wavelength=WAVE)
+    # RHO_OBSC = 0.30 * RHO_APER  # ELT central obscuration
+    # utils.check_spaxel_scale(rho_aper=RHO_APER, wavelength=WAVE)
+    #
+    # # Machine Learning bits
+    # N_train, N_test = 5000, 500  # Samples for the training of the models
+    # coef_strength = 0.01
+    # rescale = 0.35  # Rescale the coefficients to cover a wide range of RMS
+    # layer_filters = [16, 8]  # How many filters per layer
+    # kernel_size = 3
+    # input_shape = (pix, pix, 2,)
+    # epochs = 10  # Training epochs
+    # SNR = 500
+    #
+    # wave_zemax = wavelengths[0]
+    #
+    # # Rescale to physical units (* wave_zemax) then divide it to the reference wavelength
+    # # also divide by 2 Pi, since the way we compute the PSF is by multiplying the coefficients by 2 Pi
+    # test_coef = coefs * wave_zemax / WAVE / (2 * np.pi)
+    # test_coef = test_coef[:, 3:]        # remove piston and tilts
+    #
+    # # (1) We begin by creating a Zernike PSF model with Defocus as diversity
+    # zernike_matrix, pupil_mask_zernike, flat_zernike = psf.zernike_matrix(N_levels=N_levels, rho_aper=RHO_APER,
+    #                                                                       rho_obsc=RHO_OBSC,
+    #                                                                       N_PIX=N_PIX, radial_oversize=1.0)
+    # zernike_matrices = [zernike_matrix, pupil_mask_zernike, flat_zernike]
+    # diversity_coef = np.zeros((zernike_matrix.shape[-1]))
+    # diversity_coef[1] = 1 / (2*np.pi)
+    # PSF_zernike = psf.PointSpreadFunction(matrices=zernike_matrices, N_pix=N_PIX,
+    #                                       crop_pix=pix, diversity_coef=diversity_coef)
+    #
+    # # Generate training and test datasets (clean PSF images)
+    # train_PSF, train_coef, test_p, test_c = calibration.generate_dataset(PSF_zernike, N_train, 0,
+    #                                                                        coef_strength=coef_strength, rescale=rescale)
+    #
+    # # Check Defocus / Nominal ratio
+    # peaks_nom = np.max(train_PSF[:, :, :, 0], axis=(1, 2))
+    # peaks_foc = np.max(train_PSF[:, :, :, 1], axis=(1, 2))
+    # plt.figure()
+    # plt.plot(peaks_nom)
+    # plt.plot(peaks_foc)
+    # plt.show()
+    #
+
+
 

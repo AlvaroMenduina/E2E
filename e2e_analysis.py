@@ -23,6 +23,9 @@ from sklearn.neighbors import KernelDensity
 from scipy.signal import convolve2d
 from scipy.optimize import curve_fit
 import functools
+import re
+
+import clr, os, winreg
 
 from win32com.client.gencache import EnsureDispatch, EnsureModule
 from win32com.client import constants
@@ -50,7 +53,7 @@ class PythonStandaloneApplication(object):
     class SystemNotPresentException(Exception):
         pass
 
-    def __init__(self):
+    def __init__(self, path=None):
         # make sure the Python wrappers are available for the COM client and
         # interfaces
         EnsureModule('{EA433010-2BAC-43C4-857C-7AEAC4A8CCE0}', 0, 1, 0)
@@ -83,6 +86,37 @@ class PythonStandaloneApplication(object):
         if self.TheSystem is None:
             raise PythonStandaloneApplication.SystemNotPresentException(
                 "Unable to acquire Primary system")
+
+        # # New stuff
+        # # determine location of ZOSAPI_NetHelper.dll & add as reference
+        # aKey = winreg.OpenKey(winreg.ConnectRegistry(None, winreg.HKEY_CURRENT_USER), r"Software\Zemax", 0, winreg.KEY_READ)
+        # zemaxData = winreg.QueryValueEx(aKey, 'ZemaxRoot')
+        # NetHelper = os.path.join(os.sep, zemaxData[0], r'ZOS-API\Libraries\ZOSAPI_NetHelper.dll')
+        # winreg.CloseKey(aKey)
+        # clr.AddReference(NetHelper)
+        # import ZOSAPI_NetHelper
+        #
+        # # Find the installed version of OpticStudio
+        # if path is None:
+        #     isInitialized = ZOSAPI_NetHelper.ZOSAPI_Initializer.Initialize()
+        # else:
+        #     # Note -- uncomment the following line to use a custom initialization path
+        #     isInitialized = ZOSAPI_NetHelper.ZOSAPI_Initializer.Initialize(path)
+        #
+        # # determine the ZOS root directory
+        # if isInitialized:
+        #     dir = ZOSAPI_NetHelper.ZOSAPI_Initializer.GetZemaxDirectory()
+        # else:
+        #     raise PythonStandaloneApplication.InitializationException(
+        #         "Unable to locate Zemax OpticStudio.  Try using a hard-coded path.")
+        #
+        # # add ZOS-API referencecs
+        # clr.AddReference(os.path.join(os.sep, dir, "ZOSAPI.dll"))
+        # clr.AddReference(os.path.join(os.sep, dir, "ZOSAPI_Interfaces.dll"))
+        # import ZOSAPI
+        #
+        # # create a reference to the API namespace
+        # self.ZOSAPI = ZOSAPI
 
     def __del__(self):
         if self.TheApplication is not None:
@@ -1768,9 +1802,7 @@ class RMS_WFE_Analysis(AnalysisGeneric):
 
 class WavefrontsAnalysis(AnalysisFast):
 
-    @staticmethod
-    def analysis_function_wavefronts(system, wavelength_idx, config, surface, sampling, remove_slicer=False):
-
+    def analysis_function_wavefronts(self, system, wavelength_idx, config, surface, sampling, coef_path, remove_slicer=False):
 
         # Set Current Configuration
         system.MCE.SetCurrentConfiguration(config)
@@ -1811,6 +1843,39 @@ class WavefrontsAnalysis(AnalysisFast):
                     print("X_HalfWidth = %.2f" % current_apt_sett._S_RectangularAperture.XHalfWidth)
                     print("Y_HalfWidth = %.2f" % current_apt_sett._S_RectangularAperture.YHalfWidth)
 
+        # Add a Zernike surface at the Entrance Pupil
+        # First we check whether we have already added
+        # surface_name2 = system.LDE.GetSurfaceAt(2).Comment
+        # if surface_name2 != "Zernike Correction":
+        #     print("Inserting new surface at #2")
+        #     # we have to add the surface
+        #     system.LDE.InsertNewSurfaceAt(2)
+        #     zernike_surface = system.LDE.GetSurfaceAt(2)
+        #     zernike_surface.Comment = "Zernike Correction"
+        #
+        #     types = zernike_surface.AvailableSurfaceTypes()
+        #     print(types)
+        #
+        #     print("Surface Type: ", system.LDE.GetSurfaceAt(2).TypeName)
+        #     SurfaceType = zernike_surface.GetSurfaceTypeSettings(ZOSAPI.Editors.LDE.SurfaceType.CoordinateBreak)
+        #     # SurfaceType = zernike_surface.GetSurfaceTypeSettings()
+        #     #
+        #     zernike_surface.ChangeType(constants.SurfaceType_ZernikeStandardPhase)
+        #
+        #     # Get aperture data
+        #     system_data = system.SystemData
+        #     system_aperture_value = system_data.Aperture.ApertureValue
+        #     system_aperture_type = system_data.Aperture.ApertureType
+        #
+        #     entrance_pupil_diam = system_aperture_value
+        #
+        # else:
+        #     print("Surface #2 is already: ", surface_name2)
+        #
+        # N_s = system.LDE.NumberOfSurfaces
+        # print(N_s)
+        # print("_______")
+
         # Get the Field Points for that configuration
         sysField = system.SystemData.Fields
         N_fields = sysField.NumberOfFields
@@ -1849,6 +1914,66 @@ class WavefrontsAnalysis(AnalysisFast):
         if sampling not in samps:
             ValueError('sampling must be one of the following: ' +
                        ', '.join(samps.keys()))
+
+        # Get the Zernike Standard Coefficients for the Wavefront at the Detector
+        # # set next wavelength
+        wavelength = system.SystemData.Wavelengths.GetWavelength(wavelength_idx[0]).Wavelength
+
+        analysis_coeffs = system.Analyses.New_Analysis(constants.AnalysisIDM_ZernikeStandardCoefficients)
+        settings = analysis_coeffs.GetSettings()
+        csettings = CastTo(settings, 'IAS_ZernikeStandardCoefficients')
+        csettings.Surface.SetSurfaceNumber(N_surfaces)
+        csettings.Wavelength.SetWavelengthNumber(wavelength)
+        # csettings.Sampling = samps[sampling]
+        csettings.Field.SetFieldNumber(2)
+        analysis_coeffs.ApplyAndWaitForCompletion()
+
+        results = analysis_coeffs.GetResults()
+        cresults = CastTo(results, 'IAR_')
+
+        # save results as a stupid text file because Zemax won't give you an array
+        file_name = os.path.join(coef_path, 'result_config%d.txt' % config)
+        cresults.GetTextFile(file_name)
+
+        N_zern = 15
+        std_coef = self.read_zernike_coefficients(file_name, N_zern=N_zern)
+        print("Zernike Coefficients: ")
+        print(std_coef)
+        analysis_coeffs.Close()
+
+        # Now we apply those Zernike coefficients as correction at the entrance pupil
+
+        zernike_phase = system.LDE.GetSurfaceAt(2)
+        print(zernike_phase.Comment)
+        # Setting the N_terms to 0 removes all coefficients (sanity check)
+        zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par13).IntegerValue = 0
+        zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par13).IntegerValue = 5
+        # Start with the terms again
+
+        # Norm Radius
+        system_aperture_diam = system.SystemData.Aperture.ApertureValue
+        zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par14).DoubleValue = system_aperture_diam / 2
+
+        list_params = [constants.SurfaceColumn_Par15, constants.SurfaceColumn_Par16, constants.SurfaceColumn_Par17,
+                       constants.SurfaceColumn_Par18, constants.SurfaceColumn_Par19, constants.SurfaceColumn_Par20,
+                       constants.SurfaceColumn_Par21, constants.SurfaceColumn_Par22, constants.SurfaceColumn_Par23,
+                       constants.SurfaceColumn_Par24, constants.SurfaceColumn_Par25, constants.SurfaceColumn_Par26,
+                       constants.SurfaceColumn_Par27, constants.SurfaceColumn_Par28, constants.SurfaceColumn_Par29]
+
+        zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par15).DoubleValue = -std_coef[0]
+        zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par16).DoubleValue = -std_coef[1]
+        zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par17).DoubleValue = -std_coef[2]
+        zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par18).DoubleValue = -std_coef[3]
+        zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par19).DoubleValue = -std_coef[4]
+        # zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par20).DoubleValue = -std_coef[5]
+
+
+        # for k, param in enumerate(list_params[:N_zern]):
+        #     a0 = zernike_phase.GetSurfaceCell(param).DoubleValue
+        #     print(a0)
+        #     zernike_phase.GetSurfaceCell(param).DoubleValue = -std_coef[k]
+        a0 = zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par15).DoubleValue
+        print(a0)
 
         # iterate through wavelengths
         for j, wave_idx in enumerate(wavelength_idx):
@@ -1891,20 +2016,34 @@ class WavefrontsAnalysis(AnalysisFast):
             rms_wfe_nm = rms_wfe * wavelength * 1e3
             # print(ptv_zos, rms_zos)
 
-            # plt.figure()
-            # plt.imshow(data, cmap='jet', origin='lower')
-            # plt.title(r'Wave: %.3f $\mu$m, Slice #%d | RMS: %.3f $\lambda$ (%.1f nm)' % (wavelength, config, rms_wfe, rms_wfe_nm))
-            # plt.colorbar()
-            # plt.show()
+            plt.figure()
+            plt.imshow(data, cmap='jet', origin='lower')
+            plt.title(r'Wave: %.3f $\mu$m, Slice #%d | RMS: %.3f $\lambda$ (%.1f nm)' % (wavelength, config, rms_wfe, rms_wfe_nm))
+            plt.colorbar()
+            plt.show()
 
         # close analysis
         awfe.Close()
+        # data = np.zeros((1, 128, 128))
 
         return [data, foc_xy]
 
+    @staticmethod
+    def read_zernike_coefficients(file_name, N_zern):
+        f = open(file_name, encoding="utf-16")
+        skiprows = 38
+        lines = f.readlines()[skiprows:]
+        coef = np.zeros(N_zern)
+        for k in range(N_zern):
+            # read the float coefficient in the text line
+            str_coef = re.findall("[+-]?\d+\.\d+", lines[k])[0]
+            # print(str_coef)
+            coef[k] = float(str_coef)
+        return coef
+
     def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
                         configuration_idx=None, surface=None, sampling=1024,
-                        save_hdf5=True, remove_slicer_aperture=True):
+                        save_hdf5=True, coef_path=None, remove_slicer_aperture=True):
 
 
         # XXX
@@ -1934,7 +2073,8 @@ class WavefrontsAnalysis(AnalysisFast):
                                              files_dir=files_dir, zemax_file=zemax_file, results_path=results_path,
                                              results_shapes=results_shapes, results_names=results_names,
                                              wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
-                                             surface=surface, sampling=sampling_str, remove_slicer=remove_slicer_aperture)
+                                             surface=surface, sampling=sampling_str,
+                                             coef_path=coef_path, remove_slicer=remove_slicer_aperture)
 
             results.append(list_results)
 
