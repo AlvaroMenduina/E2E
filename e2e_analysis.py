@@ -1915,65 +1915,65 @@ class WavefrontsAnalysis(AnalysisFast):
             ValueError('sampling must be one of the following: ' +
                        ', '.join(samps.keys()))
 
-        # Get the Zernike Standard Coefficients for the Wavefront at the Detector
-        # # set next wavelength
-        wavelength = system.SystemData.Wavelengths.GetWavelength(wavelength_idx[0]).Wavelength
-
-        analysis_coeffs = system.Analyses.New_Analysis(constants.AnalysisIDM_ZernikeStandardCoefficients)
-        settings = analysis_coeffs.GetSettings()
-        csettings = CastTo(settings, 'IAS_ZernikeStandardCoefficients')
-        csettings.Surface.SetSurfaceNumber(N_surfaces)
-        csettings.Wavelength.SetWavelengthNumber(wavelength)
-        # csettings.Sampling = samps[sampling]
-        csettings.Field.SetFieldNumber(2)
-        analysis_coeffs.ApplyAndWaitForCompletion()
-
-        results = analysis_coeffs.GetResults()
-        cresults = CastTo(results, 'IAR_')
-
-        # save results as a stupid text file because Zemax won't give you an array
-        file_name = os.path.join(coef_path, 'result_config%d.txt' % config)
-        cresults.GetTextFile(file_name)
-
-        N_zern = 15
-        std_coef = self.read_zernike_coefficients(file_name, N_zern=N_zern)
-        print("Zernike Coefficients: ")
-        print(std_coef)
-        analysis_coeffs.Close()
-
-        # Now we apply those Zernike coefficients as correction at the entrance pupil
-
-        zernike_phase = system.LDE.GetSurfaceAt(2)
-        print(zernike_phase.Comment)
-        # Setting the N_terms to 0 removes all coefficients (sanity check)
-        zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par13).IntegerValue = 0
-        zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par13).IntegerValue = 5
-        # Start with the terms again
-
-        # Norm Radius
-        system_aperture_diam = system.SystemData.Aperture.ApertureValue
-        zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par14).DoubleValue = system_aperture_diam / 2
-
-        list_params = [constants.SurfaceColumn_Par15, constants.SurfaceColumn_Par16, constants.SurfaceColumn_Par17,
-                       constants.SurfaceColumn_Par18, constants.SurfaceColumn_Par19, constants.SurfaceColumn_Par20,
-                       constants.SurfaceColumn_Par21, constants.SurfaceColumn_Par22, constants.SurfaceColumn_Par23,
-                       constants.SurfaceColumn_Par24, constants.SurfaceColumn_Par25, constants.SurfaceColumn_Par26,
-                       constants.SurfaceColumn_Par27, constants.SurfaceColumn_Par28, constants.SurfaceColumn_Par29]
-
-        zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par15).DoubleValue = -std_coef[0]
-        zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par16).DoubleValue = -std_coef[1]
-        zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par17).DoubleValue = -std_coef[2]
-        zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par18).DoubleValue = -std_coef[3]
-        zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par19).DoubleValue = -std_coef[4]
-        # zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par20).DoubleValue = -std_coef[5]
-
-
-        # for k, param in enumerate(list_params[:N_zern]):
-        #     a0 = zernike_phase.GetSurfaceCell(param).DoubleValue
-        #     print(a0)
-        #     zernike_phase.GetSurfaceCell(param).DoubleValue = -std_coef[k]
-        a0 = zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par15).DoubleValue
-        print(a0)
+        # # Get the Zernike Standard Coefficients for the Wavefront at the Detector
+        # # # set next wavelength
+        # wavelength = system.SystemData.Wavelengths.GetWavelength(wavelength_idx[0]).Wavelength
+        #
+        # analysis_coeffs = system.Analyses.New_Analysis(constants.AnalysisIDM_ZernikeStandardCoefficients)
+        # settings = analysis_coeffs.GetSettings()
+        # csettings = CastTo(settings, 'IAS_ZernikeStandardCoefficients')
+        # csettings.Surface.SetSurfaceNumber(N_surfaces)
+        # csettings.Wavelength.SetWavelengthNumber(wavelength)
+        # # csettings.Sampling = samps[sampling]
+        # csettings.Field.SetFieldNumber(2)
+        # analysis_coeffs.ApplyAndWaitForCompletion()
+        #
+        # results = analysis_coeffs.GetResults()
+        # cresults = CastTo(results, 'IAR_')
+        #
+        # # save results as a stupid text file because Zemax won't give you an array
+        # file_name = os.path.join(coef_path, 'result_config%d.txt' % config)
+        # cresults.GetTextFile(file_name)
+        #
+        # N_zern = 15
+        # std_coef = self.read_zernike_coefficients(file_name, N_zern=N_zern)
+        # print("Zernike Coefficients: ")
+        # print(std_coef)
+        # analysis_coeffs.Close()
+        #
+        # # Now we apply those Zernike coefficients as correction at the entrance pupil
+        #
+        # zernike_phase = system.LDE.GetSurfaceAt(2)
+        # print(zernike_phase.Comment)
+        # # Setting the N_terms to 0 removes all coefficients (sanity check)
+        # zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par13).IntegerValue = 0
+        # zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par13).IntegerValue = 5
+        # # Start with the terms again
+        #
+        # # Norm Radius
+        # system_aperture_diam = system.SystemData.Aperture.ApertureValue
+        # zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par14).DoubleValue = system_aperture_diam / 2
+        #
+        # list_params = [constants.SurfaceColumn_Par15, constants.SurfaceColumn_Par16, constants.SurfaceColumn_Par17,
+        #                constants.SurfaceColumn_Par18, constants.SurfaceColumn_Par19, constants.SurfaceColumn_Par20,
+        #                constants.SurfaceColumn_Par21, constants.SurfaceColumn_Par22, constants.SurfaceColumn_Par23,
+        #                constants.SurfaceColumn_Par24, constants.SurfaceColumn_Par25, constants.SurfaceColumn_Par26,
+        #                constants.SurfaceColumn_Par27, constants.SurfaceColumn_Par28, constants.SurfaceColumn_Par29]
+        #
+        # zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par15).DoubleValue = -std_coef[0]
+        # zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par16).DoubleValue = -std_coef[1]
+        # zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par17).DoubleValue = -std_coef[2]
+        # zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par18).DoubleValue = -std_coef[3]
+        # zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par19).DoubleValue = -std_coef[4]
+        # # zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par20).DoubleValue = -std_coef[5]
+        #
+        #
+        # # for k, param in enumerate(list_params[:N_zern]):
+        # #     a0 = zernike_phase.GetSurfaceCell(param).DoubleValue
+        # #     print(a0)
+        # #     zernike_phase.GetSurfaceCell(param).DoubleValue = -std_coef[k]
+        # a0 = zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par15).DoubleValue
+        # print(a0)
 
         # iterate through wavelengths
         for j, wave_idx in enumerate(wavelength_idx):
@@ -2016,11 +2016,11 @@ class WavefrontsAnalysis(AnalysisFast):
             rms_wfe_nm = rms_wfe * wavelength * 1e3
             # print(ptv_zos, rms_zos)
 
-            plt.figure()
-            plt.imshow(data, cmap='jet', origin='lower')
-            plt.title(r'Wave: %.3f $\mu$m, Slice #%d | RMS: %.3f $\lambda$ (%.1f nm)' % (wavelength, config, rms_wfe, rms_wfe_nm))
-            plt.colorbar()
-            plt.show()
+            # plt.figure()
+            # plt.imshow(data, cmap='jet', origin='lower')
+            # plt.title(r'Wave: %.3f $\mu$m, Slice #%d | RMS: %.3f $\lambda$ (%.1f nm)' % (wavelength, config, rms_wfe, rms_wfe_nm))
+            # plt.colorbar()
+            # plt.show()
 
         # close analysis
         awfe.Close()
@@ -2123,7 +2123,8 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
             for k in np.arange(1, N_surfaces):
                 surface_names[k] = system.LDE.GetSurfaceAt(k).Comment
             # find the Slicer surface number
-            slicer_num = list(surface_names.keys())[list(surface_names.values()).index('Slicer Mirror')]
+            # slicer_num = list(surface_names.keys())[list(surface_names.values()).index('Slicer Mirror')]
+            slicer_num = list(surface_names.keys())[list(surface_names.values()).index('IFU ISA')]
             slicer = system.LDE.GetSurfaceAt(slicer_num)
 
             # Read Current Aperture Settings

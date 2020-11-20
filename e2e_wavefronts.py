@@ -18,9 +18,9 @@ import zernike as zern
 import pandas as pd
 import seaborn as sns
 
-# import psf
-# import utils
-# import calibration
+import psf
+import utils
+import calibration
 
 
 class ZernikeFit(object):
@@ -182,12 +182,12 @@ if __name__ == """__main__""":
     sampling = 128
     # gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_SHORT', 'K_LONG']
     gratings = ['H']
-    files_path = os.path.abspath("D:\End to End Model\Wavefronts")
+    files_path = os.path.abspath("D:\End to End Model\August_2020")
     results_path = os.path.abspath("D:\End to End Model\Wavefronts")
     # [*] This is the bit we have to change when you run the analysis in your system [*]
 
     maps, wavelengths = wavefronts(zosapi=psa, sys_mode=sys_mode, ao_modes=ao_modes, spaxel_scale=spaxel_scale,
-                      grating=gratings[0], sampling=sampling, wavelength_idx=1, config_idx=None, files_path=files_path, results_path=results_path)
+                                   grating=gratings[0], sampling=sampling, wavelength_idx=1, config_idx=None, files_path=files_path, results_path=results_path)
 
     maps_all = np.concatenate(maps, axis=0)
 
@@ -322,57 +322,121 @@ if __name__ == """__main__""":
     # ================================================================================================================ #
     #                                Machine Learning calibration
     # ================================================================================================================ #
-    #
-    # ### PARAMETERS ###
-    #
-    # # PSF bits
-    # N_PIX = 256  # pixels for the Fourier arrays
-    # pix = 30  # pixels to crop the PSF images
-    # WAVE = 1.5  # microns | reference wavelength
-    # SPAX = 4.0  # mas | spaxel scale
-    # RHO_APER = utils.rho_spaxel_scale(spaxel_scale=SPAX, wavelength=WAVE)
-    # RHO_OBSC = 0.30 * RHO_APER  # ELT central obscuration
-    # utils.check_spaxel_scale(rho_aper=RHO_APER, wavelength=WAVE)
-    #
-    # # Machine Learning bits
-    # N_train, N_test = 5000, 500  # Samples for the training of the models
-    # coef_strength = 0.01
-    # rescale = 0.35  # Rescale the coefficients to cover a wide range of RMS
-    # layer_filters = [16, 8]  # How many filters per layer
-    # kernel_size = 3
-    # input_shape = (pix, pix, 2,)
-    # epochs = 10  # Training epochs
-    # SNR = 500
-    #
-    # wave_zemax = wavelengths[0]
-    #
-    # # Rescale to physical units (* wave_zemax) then divide it to the reference wavelength
-    # # also divide by 2 Pi, since the way we compute the PSF is by multiplying the coefficients by 2 Pi
-    # test_coef = coefs * wave_zemax / WAVE / (2 * np.pi)
-    # test_coef = test_coef[:, 3:]        # remove piston and tilts
-    #
-    # # (1) We begin by creating a Zernike PSF model with Defocus as diversity
-    # zernike_matrix, pupil_mask_zernike, flat_zernike = psf.zernike_matrix(N_levels=N_levels, rho_aper=RHO_APER,
-    #                                                                       rho_obsc=RHO_OBSC,
-    #                                                                       N_PIX=N_PIX, radial_oversize=1.0)
-    # zernike_matrices = [zernike_matrix, pupil_mask_zernike, flat_zernike]
-    # diversity_coef = np.zeros((zernike_matrix.shape[-1]))
-    # diversity_coef[1] = 1 / (2*np.pi)
-    # PSF_zernike = psf.PointSpreadFunction(matrices=zernike_matrices, N_pix=N_PIX,
-    #                                       crop_pix=pix, diversity_coef=diversity_coef)
-    #
-    # # Generate training and test datasets (clean PSF images)
-    # train_PSF, train_coef, test_p, test_c = calibration.generate_dataset(PSF_zernike, N_train, 0,
-    #                                                                        coef_strength=coef_strength, rescale=rescale)
-    #
-    # # Check Defocus / Nominal ratio
-    # peaks_nom = np.max(train_PSF[:, :, :, 0], axis=(1, 2))
-    # peaks_foc = np.max(train_PSF[:, :, :, 1], axis=(1, 2))
-    # plt.figure()
-    # plt.plot(peaks_nom)
-    # plt.plot(peaks_foc)
-    # plt.show()
-    #
+
+    ### PARAMETERS ###
+
+    # PSF bits
+    N_PIX = 256  # pixels for the Fourier arrays
+    pix = 30  # pixels to crop the PSF images
+    WAVE = 1.5  # microns | reference wavelength
+    SPAX = 4.0  # mas | spaxel scale
+    RHO_APER = utils.rho_spaxel_scale(spaxel_scale=SPAX, wavelength=WAVE)
+    RHO_OBSC = 0.30 * RHO_APER  # ELT central obscuration
+    utils.check_spaxel_scale(rho_aper=RHO_APER, wavelength=WAVE)
+
+    # Machine Learning bits
+    N_train, N_test = 5000, 500  # Samples for the training of the models
+    coef_strength = 0.01
+    rescale = 0.35  # Rescale the coefficients to cover a wide range of RMS
+    layer_filters = [16, 8]  # How many filters per layer
+    kernel_size = 3
+    input_shape = (pix, pix, 2,)
+    epochs = 10  # Training epochs
+    SNR = 500
+
+    wave_zemax = wavelengths[0]
+
+    # Rescale to physical units (* wave_zemax) then divide it to the reference wavelength
+    # also divide by 2 Pi, since the way we compute the PSF is by multiplying the coefficients by 2 Pi
+    test_coef = coefs * wave_zemax / WAVE / (2 * np.pi)
+    test_coef = test_coef[:, 3:]        # remove piston and tilts
+
+    # (1) We begin by creating a Zernike PSF model with Defocus as diversity
+    zernike_matrix, pupil_mask_zernike, flat_zernike = psf.zernike_matrix(N_levels=N_levels, rho_aper=RHO_APER,
+                                                                          rho_obsc=RHO_OBSC,
+                                                                          N_PIX=N_PIX, radial_oversize=1.0)
+    zernike_matrices = [zernike_matrix, pupil_mask_zernike, flat_zernike]
+    N_zern = zernike_matrix.shape[-1]
+    diversity_coef = np.zeros((zernike_matrix.shape[-1]))
+    diversity_coef[1] = 1 / (2*np.pi)
+    PSF_zernike = psf.PointSpreadFunction(matrices=zernike_matrices, N_pix=N_PIX,
+                                          crop_pix=pix, diversity_coef=diversity_coef)
+
+    # For the Nominal HARMONI design, the performance is almost perfect
+    # so if we do not rescale the coefficients, we'll get absurdly large Strehls to begin with
+    # Thus, we should probably find a scaling law to "select" how much Strehl we want,
+    # while keeping the same aberration content
+
+    def calculate_average_strehl(alpha, coef):
+
+        N_PSF = coef.shape[0]
+        strehls = np.zeros(N_PSF)
+        for k in range(N_PSF):
+            p, _s = PSF_zernike.compute_PSF(alpha * coef[k])
+            strehls[k] = _s
+        mean_strehl = np.mean(strehls)
+        return mean_strehl
+
+    N_alphas = 20
+    alphas = np.logspace(0, 2, N_alphas)
+    strehls = np.zeros(N_alphas)
+    for k in range(N_alphas):
+        print(k)
+        strehls[k] = calculate_average_strehl(alpha=alphas[k], coef=test_coef)
+
+    plt.figure()
+    plt.plot(alphas, strehls)
+    plt.xlabel(r'Alpha')
+    plt.ylabel(r'Strehl')
+    plt.show()
+
+    # Generate training and test datasets (clean PSF images)
+    train_PSF, train_coef, test_p, test_c = calibration.generate_dataset(PSF_zernike, N_train, N_test,
+                                                                         coef_strength=coef_strength, rescale=rescale)
+
+    # Check Defocus / Nominal ratio
+    peaks_nom = np.max(train_PSF[:, :, :, 0], axis=(1, 2))
+    peaks_foc = np.max(train_PSF[:, :, :, 1], axis=(1, 2))
+    plt.figure()
+    plt.plot(peaks_nom)
+    plt.plot(peaks_foc)
+    plt.show()
+
+    # Generate the Test Set using the coefficients
+    N_PSF = test_coef.shape[0]
+    test_PSF = np.zeros((N_PSF, pix, pix, 2))
+    for k in range(N_PSF):
+        pnom, _s = PSF_zernike.compute_PSF(test_coef[k])
+        pfoc, _s = PSF_zernike.compute_PSF(test_coef[k], diversity=True)
+        test_PSF[k, :, :, 0] = pnom
+        test_PSF[k, :, :, 1] = pfoc
+
+    # Initialize Convolutional Neural Network model for calibration
+    calibration_model = calibration.create_cnn_model(layer_filters, kernel_size, input_shape,
+                                                     N_classes=N_zern, name='CALIBR', activation='relu')
+
+    # Train the calibration model
+    train_history = calibration_model.fit(x=train_PSF, y=train_coef,
+                                          validation_data=(test_PSF, test_coef),
+                                          epochs=epochs, batch_size=32, shuffle=True, verbose=1)
+
+    from numpy.linalg import norm
+    # Evaluate performance
+    guess_coef = calibration_model.predict(test_PSF)
+    residual_coef = test_coef - guess_coef
+    norm_before = np.mean(norm(test_coef, axis=1))
+    norm_after = np.mean(norm(residual_coef, axis=1))
+    print("\nPerformance:")
+    print("Average Norm Coefficients")
+    print("Before: %.5f" % norm_before)
+    print("After : %.5f" % norm_after)
+
+    plt.figure()
+    plt.scatter(test_coef[:, 1], guess_coef[:, 1], s=5)
+    plt.show()
+
+    # Problem: these coefficients are in the basis of Python Zernikes
+    # if we want to apply a correction in Zemax, we have to transform them back
 
 
 

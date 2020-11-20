@@ -184,7 +184,9 @@ def detector_rms_wfe(zosapi, sys_mode, ao_modes, spaxel_scale, spaxels_per_slice
     if not os.path.exists(analysis_dir):
         os.mkdir(analysis_dir)
 
-    ifu_sections = ['AB', 'CD', 'EF', 'GH']
+    ifu_sections = ['AB', 'CD']
+    # ifu_sections = ['AB', 'EF']
+    # ifu_sections = ['CD', 'GH']
     analysis = e2e.RMS_WFE_FastAnalysis(zosapi=zosapi)      # The analysis object
 
     rms_maps, object_coord, focal_coord = [], [], []        # Lists to save the results for each IFU channel
@@ -217,40 +219,41 @@ def detector_rms_wfe(zosapi, sys_mode, ao_modes, spaxel_scale, spaxels_per_slice
     # (1) DETECTOR plane plot
     fig, axes = plt.subplots(2, 2, figsize=(10, 10))
     # Loop over the IFU channels: AB, CD, EF, GH
-    for i in range(2):
-        for j in range(2):
-            k = 2 * i + j
-            ifu_section = ifu_sections[k]
-            ax = axes[i][j]
-            _foc_xy = focal_coord[k]
-            _rms_field = rms_maps[k]
+    # for i in range(2):
+    i = 0
+    for j in range(2):
+        k = 2 * i + j
+        ifu_section = ifu_sections[k]
+        ax = axes[i][j]
+        _foc_xy = focal_coord[k]
+        _rms_field = rms_maps[k]
 
-            x_odd, y_odd = _foc_xy[::2, :, :, 0].flatten(), _foc_xy[::2, :, :, 1].flatten()
-            x_even, y_even = _foc_xy[1::2, :, :, 0].flatten(), _foc_xy[1::2, :, :, 1].flatten()
-            triang_odd = tri.Triangulation(x_odd, y_odd)
-            triang_even = tri.Triangulation(x_even, y_even)
+        x_odd, y_odd = _foc_xy[::2, :, :, 0].flatten(), _foc_xy[::2, :, :, 1].flatten()
+        x_even, y_even = _foc_xy[1::2, :, :, 0].flatten(), _foc_xy[1::2, :, :, 1].flatten()
+        triang_odd = tri.Triangulation(x_odd, y_odd)
+        triang_even = tri.Triangulation(x_even, y_even)
 
-            min_circle_ratio = .05
-            mask_odd = tri.TriAnalyzer(triang_odd).get_flat_tri_mask(min_circle_ratio)
-            triang_odd.set_mask(mask_odd)
-            mask_even = tri.TriAnalyzer(triang_even).get_flat_tri_mask(min_circle_ratio)
-            triang_even.set_mask(mask_even)
+        min_circle_ratio = .05
+        mask_odd = tri.TriAnalyzer(triang_odd).get_flat_tri_mask(min_circle_ratio)
+        triang_odd.set_mask(mask_odd)
+        mask_even = tri.TriAnalyzer(triang_even).get_flat_tri_mask(min_circle_ratio)
+        triang_even.set_mask(mask_even)
 
-            tpc_odd = ax.tripcolor(triang_odd, _rms_field[::2].flatten(), shading='flat', cmap='jet')
-            tpc_odd.set_clim(vmin=min_rms, vmax=max_rms)
-            tpc_even = ax.tripcolor(triang_even, _rms_field[1::2].flatten(), shading='flat', cmap='jet')
-            tpc_even.set_clim(vmin=min_rms, vmax=max_rms)
+        tpc_odd = ax.tripcolor(triang_odd, _rms_field[::2].flatten(), shading='flat', cmap='jet')
+        tpc_odd.set_clim(vmin=min_rms, vmax=max_rms)
+        tpc_even = ax.tripcolor(triang_even, _rms_field[1::2].flatten(), shading='flat', cmap='jet')
+        tpc_even.set_clim(vmin=min_rms, vmax=max_rms)
 
-            draw_detector_boundary(ax)
+        draw_detector_boundary(ax)
 
-            axis_label = 'Detector'
-            ax.set_xlabel(axis_label + r' X [mm]')
-            ax.set_ylabel(axis_label + r' Y [mm]')
-            ax.set_aspect('equal')
-            cbar = plt.colorbar(tpc_odd, ax=ax, orientation='horizontal')
-            cbar.ax.set_xlabel('[nm]')
-            title = r'IFU-%s | %s | %s | %s' % (ifu_section, spaxel_scale, grating, sys_mode)
-            ax.set_title(title)
+        axis_label = 'Detector'
+        ax.set_xlabel(axis_label + r' X [mm]')
+        ax.set_ylabel(axis_label + r' Y [mm]')
+        ax.set_aspect('equal')
+        cbar = plt.colorbar(tpc_odd, ax=ax, orientation='horizontal')
+        cbar.ax.set_xlabel('[nm]')
+        title = r'IFU-%s | %s | %s | %s' % (ifu_section, spaxel_scale, grating, sys_mode)
+        ax.set_title(title)
 
     fig_name = "RMSWFE_%s_DETECTOR_SPEC_%s_MODE_%s_%s" % (spaxel_scale, grating, sys_mode, ao_modes[0])
 
@@ -304,14 +307,14 @@ if __name__ == """__main__""":
 
     # [*] This is the bit we have to change when you run the analysis in your system [*]
     sys_mode = 'HARMONI'
-    ao_modes = ['SCAO']
-    spaxel_scale = '10x10'
+    ao_modes = ['NOAO']
+    spaxel_scale = '4x4'
     spaxels_per_slice = 3       # How many field points per Slice to use
     pupil_sampling = 4          # N x N grid per pupil quadrant. See Zemax Operand help for RWRE
     gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_SHORT', 'K_LONG']
-    # gratings = ['VIS']
-    files_path = os.path.abspath("D:\End to End Model\August_2020")
-    results_path = os.path.abspath("D:\End to End Model\Results_ReportAugust\Mode_%s\Scale_%s" % (ao_modes[0], spaxel_scale))
+    # gratings = ['H']
+    files_path = os.path.abspath("D:/End to End Model/Monte_Carlo/Nominal")
+    results_path = os.path.abspath("D:/End to End Model/Monte_Carlo/Results/Nominal/Mode_%s/Scale_%s" % (ao_modes[0], spaxel_scale))
     # [*] This is the bit we have to change when you run the analysis in your system [*]
 
     # First we want to justify the choice of Pupil Sampling.
