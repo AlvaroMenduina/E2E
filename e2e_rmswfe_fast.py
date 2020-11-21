@@ -275,6 +275,7 @@ def detector_rms_wfe(zosapi, sys_mode, ao_modes, spaxel_scale, spaxels_per_slice
         tpc = ax.tripcolor(triang, rms_, shading='flat', cmap='jet')
         min_rms, max_rms = np.min(rms_), np.max(rms_)
         tpc.set_clim(vmin=min_rms, vmax=max_rms)
+        ax.scatter(x_obj, y_obj, s=3, color='black')
 
         axis_label = 'Object'
         ax.set_xlabel(axis_label + r' X [mm]')
@@ -311,10 +312,10 @@ if __name__ == """__main__""":
     spaxel_scale = '4x4'
     spaxels_per_slice = 3       # How many field points per Slice to use
     pupil_sampling = 4          # N x N grid per pupil quadrant. See Zemax Operand help for RWRE
-    gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_SHORT', 'K_LONG']
-    # gratings = ['H']
+    # gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_SHORT', 'K_LONG']
+    gratings = ['H']
     files_path = os.path.abspath("D:/End to End Model/Monte_Carlo/Nominal")
-    results_path = os.path.abspath("D:/End to End Model/Monte_Carlo/Results/Nominal/Mode_%s/Scale_%s" % (ao_modes[0], spaxel_scale))
+    results_path = os.path.abspath("D:/End to End Model/Monte_Carlo/Nominal/Results/Mode_%s/Scale_%s" % (ao_modes[0], spaxel_scale))
     # [*] This is the bit we have to change when you run the analysis in your system [*]
 
     # First we want to justify the choice of Pupil Sampling.

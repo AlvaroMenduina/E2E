@@ -2151,12 +2151,15 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
 
         # Get the Field Points for that configuration
         sysField = system.SystemData.Fields
-        N_fields = sysField.NumberOfFields
+        # Problem with the MC files. Before, all the E2E files had only 3 fields, now there's more, some spurious ones
+        # So N_fields is no longer 3. Let's just hardcode the value to 3 temporarily
+        # N_fields = sysField.NumberOfFields
+        N_fields = 3
         N_waves = len(wavelength_idx)
         N_rays = N_waves * spaxels_per_slice
 
         fx_min, fy_min = sysField.GetField(1).X, sysField.GetField(1).Y
-        fx_max, fy_max = sysField.GetField(N_fields).X, sysField.GetField(N_fields).Y
+        fx_max, fy_max = sysField.GetField(3).X, sysField.GetField(3).Y
 
         # Note that this assumes Rectangular Normalization, the default in the E2E files.
         X_MAX = np.max([np.abs(sysField.GetField(i + 1).X) for i in range(N_fields)])
