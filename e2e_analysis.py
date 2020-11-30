@@ -1818,7 +1818,7 @@ class WavefrontsAnalysis(AnalysisFast):
             for k in np.arange(1, N_surfaces):
                 surface_names[k] = system.LDE.GetSurfaceAt(k).Comment
             # find the Slicer surface number
-            slicer_num = list(surface_names.keys())[list(surface_names.values()).index('Slicer Mirror')]
+            slicer_num = list(surface_names.keys())[list(surface_names.values()).index('IFU ISA')]
             slicer = system.LDE.GetSurfaceAt(slicer_num)
 
             # Read Current Aperture Settings
@@ -2171,8 +2171,21 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
 
         hx = np.linspace(hx_min, hx_max, spaxels_per_slice)
         hy = np.linspace(hy_min, hy_max, spaxels_per_slice)
+        #
+        # if config == 1:
+        #     print("Field Information")
+        #     print(hx)
+        #     print(hy)
+        #     raise ValueError
         # hx = np.array([sysField.GetField(i + 1).X / X_MAX for i in range(N_fields)])
         # hy = np.array([sysField.GetField(i + 1).Y / Y_MAX for i in range(N_fields)])
+
+        # print("Field Definitions")
+        # print(fx_min, fx_max)
+        # print(fy_min, fy_max)
+        # print(X_MAX)
+        # print(Y_MAX)
+        # print(hx, hy)
 
         # The Field coordinates for the Object
         obj_xy = np.array([X_MAX * hx, Y_MAX * hy]).T
@@ -2209,6 +2222,11 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
                 op.ChangeType(wfe_op)
                 op.GetOperandCell(constants.MeritColumn_Param1).Value = int(samp)
                 op.GetOperandCell(constants.MeritColumn_Param2).Value = int(wave_idx)
+
+                # if config == 1:
+                #     print("\nField Information")
+                #     print(float(h_x), float(h_y))
+
                 op.GetOperandCell(constants.MeritColumn_Param3).Value = float(h_x)
                 op.GetOperandCell(constants.MeritColumn_Param4).Value = float(h_y)
                 op.GetOperandCell(constants.MeritColumn_Weight).Value = 0
@@ -2240,14 +2258,22 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
             # Loop over all Spaxels in the Slice
             for j_field, (h_x, h_y) in enumerate(zip(hx, hy)):
 
-                irow = 2 + i_wave * N_fields + j_field
+                irow = 2 + i_wave * spaxels_per_slice + j_field
+                # print(irow)
 
                 op = theMFE.GetOperandAt(irow)
 
                 # print(op.GetOperandCell(constants.MeritColumn_Param1).Value)
                 # print(op.GetOperandCell(constants.MeritColumn_Param2).Value)
                 # print(op.GetOperandCell(constants.MeritColumn_Param3).Value)
+                # print(op.GetOperandCell(constants.MeritColumn_Param4).Value)
                 rms = op.Value
+                #
+                # if i_wave == 0:
+                #     print("\nField #%d" % (j_field + 1))
+                #     print()
+                #     print(float(h_x), float(h_y), rms)
+
                 wavelength = system.SystemData.Wavelengths.GetWavelength(wave_idx).Wavelength
 
                 RMS_WFE[i_wave, j_field] = wavelength * 1e3 * rms  # We assume the Wavelength comes in Microns
@@ -2256,6 +2282,7 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
                 # If for one the AO modes we get an RMS value of 0.0, print the data so we can double check the Zemax file
                 if RMS_WFE[i_wave, j_field] == 0.0:
                     print("\nConfig #%d | Wave #%d | Field #%d" % (config, wave_idx, j_field + 1))
+                    raise ValueError
 
                 output = normUnPolData.ReadNextResult()
                 if output[2] == 0:
@@ -2269,6 +2296,8 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
                         vignetting_surface = system.LDE.GetSurfaceAt(vignet_code).Comment
                         # print("\nConfig #%d" % (config))
                         # print("Vignetting at surface #%d: %s" % (vignet_code, vignetting_surface))
+            # if config == 1:
+            #     raise ValueError
 
         normUnPolData.ClearData()
         CastTo(raytrace, 'ISystemTool').Close()

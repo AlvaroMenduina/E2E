@@ -201,10 +201,22 @@ def detector_rms_wfe(zosapi, sys_mode, ao_modes, spaxel_scale, spaxels_per_slice
                                                 pupil_sampling=pupil_sampling, remove_slicer_aperture=True)
 
         rms_wfe, obj_xy, foc_xy, waves = list_results[0]    # Only 1 item on the list, no Monte Carlo files
+        print(rms_wfe.shape)
 
         # print a summary to spot any issues:
         print("\nFor %s scale, IFU-%s, SPEC-%s: " % (spaxel_scale, ifu_section, grating))
         print("RMS: min %.2f | mean %.2f | max %.2f nm " % (np.min(rms_wfe), np.mean(rms_wfe), np.max(rms_wfe)))
+
+        # import matplotlib.cm as cm
+        # colors = cm.Reds(np.linspace(0.5, 1.0, 76))
+        # for j in range(23):
+        #     plt.figure()
+        #     for k in range(76):
+        #         x = obj_xy[k, :, 0]
+        #         plt.plot(x, rms_wfe[k, j, :], color=colors[k])
+        #         plt.scatter(x, rms_wfe[k, j, :], color=colors[k], s=10)
+        #         plt.xlabel('Along Slice')
+        # plt.show()
 
         rms_maps.append(rms_wfe)
         focal_coord.append(foc_xy)
@@ -275,7 +287,7 @@ def detector_rms_wfe(zosapi, sys_mode, ao_modes, spaxel_scale, spaxels_per_slice
         tpc = ax.tripcolor(triang, rms_, shading='flat', cmap='jet')
         min_rms, max_rms = np.min(rms_), np.max(rms_)
         tpc.set_clim(vmin=min_rms, vmax=max_rms)
-        ax.scatter(x_obj, y_obj, s=3, color='black')
+        # ax.scatter(x_obj, y_obj, s=3, color='black')
 
         axis_label = 'Object'
         ax.set_xlabel(axis_label + r' X [mm]')
@@ -310,9 +322,9 @@ if __name__ == """__main__""":
     sys_mode = 'HARMONI'
     ao_modes = ['NOAO']
     spaxel_scale = '4x4'
-    spaxels_per_slice = 3       # How many field points per Slice to use
+    spaxels_per_slice = 15       # How many field points per Slice to use
     pupil_sampling = 4          # N x N grid per pupil quadrant. See Zemax Operand help for RWRE
-    # gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_SHORT', 'K_LONG']
+    # gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K_SHORT', 'K_LONG']
     gratings = ['H']
     files_path = os.path.abspath("D:/End to End Model/Monte_Carlo/Nominal")
     results_path = os.path.abspath("D:/End to End Model/Monte_Carlo/Nominal/Results/Mode_%s/Scale_%s" % (ao_modes[0], spaxel_scale))
@@ -333,6 +345,16 @@ if __name__ == """__main__""":
         rms_grating.append(rms.flatten())
 
     rms_grating = np.array(rms_grating).T
+
+    # Calculate 5th and 95th percentiles
+    analysis_dir = os.path.join(results_path, 'RMS_WFE')
+    for k in range(len(gratings)):
+        grating = gratings[k]
+        rms_data = rms_grating[k]
+        low_pctile = np.percentile(rms_data, 5)
+        high_pctile = np.percentile(rms_data, 95)
+
+
 
     data = pd.DataFrame(rms_grating, columns=gratings)
 

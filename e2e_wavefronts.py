@@ -140,8 +140,8 @@ def wavefronts(zosapi, sys_mode, ao_modes, spaxel_scale, grating, wavelength_idx
     if not os.path.exists(analysis_dir):
         os.mkdir(analysis_dir)
 
-    ifu_sections = ['AB', 'CD', 'EF', 'GH']
-    # ifu_sections = ['AB']
+    # ifu_sections = ['AB', 'CD', 'EF', 'GH']
+    ifu_sections = ['AB']
     analysis = e2e.WavefrontsAnalysis(zosapi=zosapi)      # The analysis object
 
     rms_maps, focal_coord = [], []        # Lists to save the results for each IFU channel
@@ -162,8 +162,8 @@ def wavefronts(zosapi, sys_mode, ao_modes, spaxel_scale, grating, wavelength_idx
     return rms_maps, waves
 
 ## Parameters ##
-N_levels = 4
-N_paths = 4
+
+N_paths = 2
 N_config = 76
 N_points = N_paths * N_config
 
@@ -182,17 +182,20 @@ if __name__ == """__main__""":
     sampling = 128
     # gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_SHORT', 'K_LONG']
     gratings = ['H']
-    files_path = os.path.abspath("D:\End to End Model\August_2020")
-    results_path = os.path.abspath("D:\End to End Model\Wavefronts")
+    # files_path = os.path.abspath("D:\End to End Model\August_2020")
+    # results_path = os.path.abspath("D:\End to End Model\Wavefronts")
+    files_path = os.path.abspath("D:/End to End Model/Monte_Carlo/Max")
+    results_path = os.path.abspath("D:/End to End Model/Monte_Carlo/Nominal/Results/Mode_%s/Scale_%s" % (ao_modes[0], spaxel_scale))
     # [*] This is the bit we have to change when you run the analysis in your system [*]
 
     maps, wavelengths = wavefronts(zosapi=psa, sys_mode=sys_mode, ao_modes=ao_modes, spaxel_scale=spaxel_scale,
                                    grating=gratings[0], sampling=sampling, wavelength_idx=1, config_idx=None, files_path=files_path, results_path=results_path)
 
-    maps_all = np.concatenate(maps, axis=0)
+    maps_all_97 = np.concatenate(maps, axis=0)
+    maps_ab = maps_all_97
 
     # Show some maps
-    maps_ab = maps_all[3*N_config:4*N_config, 0]
+    # maps_ab = maps_all[3*N_config:4*N_config, 0]
     maps_odd = maps_ab[::2]
     maps_even = maps_ab[1::2]
     N_rows = 2
@@ -214,23 +217,25 @@ if __name__ == """__main__""":
     cbar1 = plt.colorbar(img1, ax=ax1, orientation='horizontal', label='[$\lambda$]')
     ax1.xaxis.set_visible(False)
     ax1.yaxis.set_visible(False)
-    ax1.set_title(r'Image Slicer G')
+    ax1.set_title(r'Image Slicer A')
 
     img2 = ax2.imshow(wavefront_even, cmap='jet')
     img2.set_clim(np.nanmin(maps_ab), np.nanmax(maps_ab))
     cbar2 = plt.colorbar(img2, ax=ax2, orientation='horizontal', label='[$\lambda$]')
     ax2.xaxis.set_visible(False)
     ax2.yaxis.set_visible(False)
-    ax2.set_title(r'Image Slicer H')
+    ax2.set_title(r'Image Slicer B')
     plt.show()
 
     # Fit the Wavefront maps to Zernike polynomials
+    N_levels = 10
     zernike_fit = ZernikeFit(N_PIX=sampling, N_levels=N_levels)
 
     N_zern = zernike_fit.N_zern
     coefs = np.zeros((N_points, N_zern))
     for k in range(N_points):
-        wavefront = maps_all[k, 0]
+        # wavefront = maps_all[k, 0]
+        wavefront = maps_ab[k, 0]
         coef_fit = zernike_fit.fit_wavefront(wavefront)
         coefs[k] = coef_fit
 
@@ -238,6 +243,23 @@ if __name__ == """__main__""":
         plt.figure()
         plt.imshow(zernike_fit.zernike_matrix[:, :, k], cmap='jet')
         plt.title('%d' % (k + 1))
+    plt.show()
+
+
+    import matplotlib.cm as cm
+
+    idx = [3, 4, 5, 7, 8]
+    labels = ['Oblique Astig.', 'Defocus', 'Astigmatism', 'Coma', 'V Coma']
+    colors = cm.Reds(np.linspace(0.25, 1, len(idx)))
+    markers = ['o', '^', 'v', '*', 's']
+
+    plt.figure()
+    for k, label, col, mark in zip(idx, labels, colors, markers):
+        data = coefs[:, k]
+        plt.scatter(np.arange(N_config), data, s=10, label=label, color=col, marker=mark)
+    plt.legend(title=r'Aberration')
+    # plt.ylim([-0.035, 0.035])
+    plt.xlabel(r'Slice Number')
     plt.show()
 
     data = pd.DataFrame(coefs[:, 3:], columns=zernike_fit.aberrations[:7])
