@@ -7,7 +7,7 @@ construct a performance analysis
 
 Author: Alvaro Menduina
 Date Created: March 2020
-Latest version: September 2020
+Latest version: December 2020
 
 """
 
@@ -24,8 +24,6 @@ from scipy.signal import convolve2d
 from scipy.optimize import curve_fit
 import functools
 import re
-
-import clr, os, winreg
 
 from win32com.client.gencache import EnsureDispatch, EnsureModule
 from win32com.client import constants
@@ -86,37 +84,6 @@ class PythonStandaloneApplication(object):
         if self.TheSystem is None:
             raise PythonStandaloneApplication.SystemNotPresentException(
                 "Unable to acquire Primary system")
-
-        # # New stuff
-        # # determine location of ZOSAPI_NetHelper.dll & add as reference
-        # aKey = winreg.OpenKey(winreg.ConnectRegistry(None, winreg.HKEY_CURRENT_USER), r"Software\Zemax", 0, winreg.KEY_READ)
-        # zemaxData = winreg.QueryValueEx(aKey, 'ZemaxRoot')
-        # NetHelper = os.path.join(os.sep, zemaxData[0], r'ZOS-API\Libraries\ZOSAPI_NetHelper.dll')
-        # winreg.CloseKey(aKey)
-        # clr.AddReference(NetHelper)
-        # import ZOSAPI_NetHelper
-        #
-        # # Find the installed version of OpticStudio
-        # if path is None:
-        #     isInitialized = ZOSAPI_NetHelper.ZOSAPI_Initializer.Initialize()
-        # else:
-        #     # Note -- uncomment the following line to use a custom initialization path
-        #     isInitialized = ZOSAPI_NetHelper.ZOSAPI_Initializer.Initialize(path)
-        #
-        # # determine the ZOS root directory
-        # if isInitialized:
-        #     dir = ZOSAPI_NetHelper.ZOSAPI_Initializer.GetZemaxDirectory()
-        # else:
-        #     raise PythonStandaloneApplication.InitializationException(
-        #         "Unable to locate Zemax OpticStudio.  Try using a hard-coded path.")
-        #
-        # # add ZOS-API referencecs
-        # clr.AddReference(os.path.join(os.sep, dir, "ZOSAPI.dll"))
-        # clr.AddReference(os.path.join(os.sep, dir, "ZOSAPI_Interfaces.dll"))
-        # import ZOSAPI
-        #
-        # # create a reference to the API namespace
-        # self.ZOSAPI = ZOSAPI
 
     def __del__(self):
         if self.TheApplication is not None:
@@ -583,6 +550,57 @@ def define_pupil_sampling(r_obsc, N_rays, mode='random'):
         # TODO: Implement a different pupil sampling, if needed
 
     return px, py
+
+
+def create_zemax_filename_MC(AO_mode, FPRS_MC_instance, scale, IPO_MC_instance, IFUpath, IFU_MC_instance,
+                             grating, ISP_MC_instance):
+    """
+
+    Newest version that accommodates the new naming convetion for the Monte Carlos
+    which includes the instance number of each subsystem
+
+    We also get rid of the "system" option that allowed us to choose between ELT, HARMONI and IFS
+    since all the analyses are done for the HARMONI mode only.
+
+
+    """
+
+    fprs = "FPRS_%s_MC_T%s" % (AO_mode, FPRS_MC_instance)
+    ipo = "CRYO_PO%s_MC_T%s" % (scale, IPO_MC_instance)
+    if scale != "4x4":
+        ifu = "IFU" + IFUpath
+    else:
+        # For 4x4 the IFU is reversed
+        ifu = "IFU-" + IFUpath
+    ifu += "_MC_T%s" % IFU_MC_instance
+
+    if IFUpath == "AB" or IFUpath == "EF":
+        # For 4x4 the SPEC is also reversed, we add a '-' sign
+        spec = "SPEC-" + grating if scale == "4x4" else "SPEC" + grating
+
+    if IFUpath == "CD" or IFUpath == "GH":
+        spec = "SPEC" + grating if scale == "4x4" else "SPEC-" + grating
+    spec += "_MC_T%s" % ISP_MC_instance
+
+    filename = fprs + "_" + ipo + "_" + ifu + "_" + spec + ".zmx"
+    # Save settings:
+    settings = {"AO_MODE": AO_mode, "SPAX_SCALE": scale, "IFU_PATH": IFUpath, "GRATING": grating,
+                "FPRS_MC": FPRS_MC_instance, "IPO_MC": IPO_MC_instance,
+                "IFU_MC": IFU_MC_instance, "ISP_MC": ISP_MC_instance}
+
+    print("\nCreating Zemax Filename:")
+    print("AO_MODE: ", AO_mode)
+    print("SPAX_SCALE: ", scale)
+    print("IFU_PATH: ", IFUpath)
+    print("GRATING: ", grating)
+    print("Subsystem Monte Carlo Instances:")
+    print("FPRS_MC: ", FPRS_MC_instance)
+    print("IPO_MC: ", IPO_MC_instance)
+    print("IFU_MC: ", IFU_MC_instance)
+    print("ISP_MC: ", ISP_MC_instance)
+    print("Filename: ", filename)
+
+    return [filename], [settings]
 
 
 def create_zemax_file_list(which_system,
@@ -1058,19 +1076,20 @@ class AnalysisFast(object):
                      wavelength_idx=None, configuration_idx=None, surface=None,
                      *args, **kwargs):
 
+        print("\nOpening Zemax File: ", zemax_file)
         # check that the file name is correct and the zemax file exists
         if os.path.exists(os.path.join(files_dir, zemax_file)) is False:
             raise FileExistsError("%s does NOT exist" % zemax_file)
 
-        print("\nOpening Zemax File: ", zemax_file)
+
         self.zosapi.OpenFile(os.path.join(files_dir, zemax_file), False)
         file_name = zemax_file.split(".")[0]  # Remove the ".zmx" suffix
 
-        # Check if the results directory already exists
-        results_dir = os.path.join(results_path, file_name)
-        print("Results will be saved in: ", results_dir)
-        if not os.path.exists(results_dir):
-            os.mkdir(results_dir)  # If not, create the directory to store results
+        # # Check if the results directory already exists
+        # results_dir = os.path.join(results_path, file_name)
+        # print("Results will be saved in: ", results_dir)
+        # if not os.path.exists(results_dir):
+        #     os.mkdir(results_dir)  # If not, create the directory to store results
 
         # Get some info on the system
         system = self.zosapi.TheSystem  # The Optical System
@@ -2282,7 +2301,7 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
                 # If for one the AO modes we get an RMS value of 0.0, print the data so we can double check the Zemax file
                 if RMS_WFE[i_wave, j_field] == 0.0:
                     print("\nConfig #%d | Wave #%d | Field #%d" % (config, wave_idx, j_field + 1))
-                    raise ValueError
+                    # raise ValueError
 
                 output = normUnPolData.ReadNextResult()
                 if output[2] == 0:
@@ -2316,7 +2335,8 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
 
     def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
                         configuration_idx=None, surface=None, spaxels_per_slice=3, pupil_sampling=4,
-                        save_hdf5=True, remove_slicer_aperture=False):
+                        save_hdf5=True, remove_slicer_aperture=False,
+                        monte_carlo=False):
         """
         Function that loops over a given set of E2E model Zemax files, running the analysis
         defined by self.analysis_function_rms_wfe
@@ -2345,11 +2365,19 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
 
 
         # read the file options
-        file_list, sett_list = create_zemax_file_list(which_system=files_opt['which_system'],
-                                                      AO_modes=files_opt['AO_modes'], scales=files_opt['scales'],
-                                                      IFUs=files_opt['IFUs'], grating=files_opt['grating'])
+        if monte_carlo is False:
+            file_list, sett_list = create_zemax_file_list(which_system=files_opt['which_system'],
+                                                          AO_modes=files_opt['AO_modes'], scales=files_opt['scales'],
+                                                          IFUs=files_opt['IFUs'], grating=files_opt['grating'])
+        elif monte_carlo is True:
+            file_list, sett_list = create_zemax_filename_MC(AO_mode=files_opt['AO_MODE'], scale=files_opt['SPAX_SCALE'],
+                                                          IFUpath=files_opt['IFU_PATH'], grating=files_opt['GRATING'],
+                                                          FPRS_MC_instance=files_opt['FPRS_MC'],
+                                                          IPO_MC_instance=files_opt['IPO_MC'],
+                                                          IFU_MC_instance=files_opt['IFU_MC'],
+                                                          ISP_MC_instance=files_opt['ISP_MC'])
 
-        # Loop over the Zemax files
+            # Loop over the Zemax files
         results = []
         for zemax_file, settings in zip(file_list, sett_list):
 
@@ -2362,12 +2390,12 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
 
             results.append(list_results)
 
-            if save_hdf5 == True:
-                # Post-Processing the results
-                file_name = zemax_file.split('.')[0]
-                settings['surface'] = 'DETECTOR' if surface is None else surface
-                self.save_hdf5(analysis_name='RMS_WFE', analysis_metadata=metadata, list_results=list_results, results_names=results_names,
-                               file_name=file_name, file_settings=settings, results_dir=results_path)
+            # if save_hdf5 == True:
+            #     # Post-Processing the results
+            #     file_name = zemax_file.split('.')[0]
+            #     settings['surface'] = 'DETECTOR' if surface is None else surface
+            #     self.save_hdf5(analysis_name='RMS_WFE', analysis_metadata=metadata, list_results=list_results, results_names=results_names,
+            #                    file_name=file_name, file_settings=settings, results_dir=results_path)
 
         return results
 
