@@ -2367,8 +2367,8 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
         # read the file options
         if monte_carlo is False:
             file_list, sett_list = create_zemax_file_list(which_system=files_opt['which_system'],
-                                                          AO_modes=files_opt['AO_modes'], scales=files_opt['scales'],
-                                                          IFUs=files_opt['IFUs'], grating=files_opt['grating'])
+                                                          AO_modes=files_opt['AO_modes'], scales=[files_opt['SPAX_SCALE']],
+                                                          IFUs=[files_opt['IFU_PATH']], grating=[files_opt['GRATING']])
         elif monte_carlo is True:
             file_list, sett_list = create_zemax_filename_MC(AO_mode=files_opt['AO_MODE'], scale=files_opt['SPAX_SCALE'],
                                                           IFUpath=files_opt['IFU_PATH'], grating=files_opt['GRATING'],

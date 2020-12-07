@@ -180,6 +180,7 @@ def detector_rms_wfe(zosapi, file_options, spaxels_per_slice, pupil_sampling, fi
     spaxel_scale = file_options['SPAX_SCALE']
     grating = file_options['GRATING']
     monte_carlo = file_options['MONTE_CARLO']
+    ao_mode = file_options['AO_MODE']
 
     # We will create a separate folder within results_path to save the RMS WFE results
     analysis_dir = os.path.join(results_path, 'RMS_WFE')
@@ -196,6 +197,10 @@ def detector_rms_wfe(zosapi, file_options, spaxels_per_slice, pupil_sampling, fi
 
         # change the IFU path option
         file_options['IFU_PATH'] = ifu_section
+
+        # read the MC instance number of the specific IFU path
+        ifu_mc = file_options['IFU_PATHS_MC'][ifu_section]
+        file_options['IFU_MC'] = ifu_mc
 
         # options = {'which_system': sys_mode, 'AO_modes': ao_modes, 'scales': [spaxel_scale], 'IFUs': [ifu_section],
         #            'grating': [grating]}
@@ -341,17 +346,45 @@ if __name__ == """__main__""":
 
     # [*] Monte Carlo Instances [*]
     ao_mode = 'NOAO'
-    spaxel_scale = '4x4'
-    spaxels_per_slice = 3       # How many field points per Slice to use
+    spaxel_scale = '60x30'
+    spaxels_per_slice = 5       # How many field points per Slice to use
     pupil_sampling = 4          # N x N grid per pupil quadrant. See Zemax Operand help for RWRE
     # gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K_SHORT', 'K_LONG']
-    gratings = ['H']
-    file_options = {'MONTE_CARLO': True, 'AO_MODE': ao_mode, 'SPAX_SCALE': spaxel_scale,
-                    'FPRS_MC': '0000', 'IPO_MC': '0000', 'IFU_MC': '0000', 'ISP_MC': '0000'}
+    gratings = ['HK']
+    file_options = {'MONTE_CARLO': True, 'AO_MODE': ao_mode, 'SPAX_SCALE': spaxel_scale, 'SLICE_SAMPLING':spaxels_per_slice,
+                    'FPRS_MC': '0694', 'IPO_MC': '0055', 'IFU_PATHS_MC': {'AB': '0028', 'CD': '0007'}, 'ISP_MC': '0024'}
 
-    files_path = os.path.abspath("D:/End to End Model/Monte_Carlo_Dec/Nominal")
-    results_path = os.path.abspath("D:/End to End Model/Monte_Carlo_Dec/Nominal/Results/Mode_%s/Scale_%s" % (ao_mode, spaxel_scale))
+    files_path = os.path.abspath("D:/End to End Model/Monte_Carlo_Dec/Median")
+    results_path = os.path.abspath("D:/End to End Model/Monte_Carlo_Dec/Median/Results/Mode_%s/Scale_%s" % (ao_mode, spaxel_scale))
+
+    import json
+    analysis_dir = os.path.join(results_path, 'RMS_WFE')
+    print("Analysis Results will be saved in folder: ", analysis_dir)
+    if not os.path.exists(analysis_dir):
+        os.mkdir(analysis_dir)
+
+    with open(os.path.join(analysis_dir, 'MC_settings.txt'), 'w') as file:
+        file.write(json.dumps(file_options))
+
+
     # [*] Monte Carlo Instances [*]
+
+    # # [*] This is the bit we have to change when you run the analysis in your system [*]
+    # sys_mode = 'HARMONI'
+    # ao_modes = ['NOAO']
+    # spaxel_scale = '10x10'
+    # spaxels_per_slice = 10       # How many field points per Slice to use
+    # pupil_sampling = 4          # N x N grid per pupil quadrant. See Zemax Operand help for RWRE
+    # # gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K_SHORT', 'K_LONG']
+    # gratings = ['H']
+    #
+    # file_options = {'MONTE_CARLO': False, 'which_system': sys_mode, 'AO_modes': ao_modes,
+    #                 'SPAX_SCALE': spaxel_scale, 'AO_MODE': ao_modes[0]}
+    #
+    # files_path = os.path.abspath("D:/End to End Model/August_2020")
+    # results_path = os.path.abspath("D:/End to End Model/Results_ReportAugust/Mode_%s/Scale_%s" % (ao_modes[0], spaxel_scale))
+    # results_path = os.path.abspath("D:/End to End Model/Monte_Carlo/Nominal/Results/Mode_%s/Scale_%s" % (ao_modes[0], spaxel_scale))
+    # [*] This is the bit we have to change when you run the analysis in your system [*]
 
     rms_grating = []
     for grating in gratings:
@@ -364,37 +397,24 @@ if __name__ == """__main__""":
     rms_grating = np.array(rms_grating).T
 
 
-    # # [*] This is the bit we have to change when you run the analysis in your system [*]
-    # sys_mode = 'HARMONI'
-    # ao_modes = ['NOAO']
-    # spaxel_scale = '4x4'
-    # spaxels_per_slice = 3       # How many field points per Slice to use
-    # pupil_sampling = 4          # N x N grid per pupil quadrant. See Zemax Operand help for RWRE
-    # gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K_SHORT', 'K_LONG']
-    # # gratings = ['H']
-    # files_path = os.path.abspath("D:/End to End Model/August_2020")
-    # results_path = os.path.abspath("D:/End to End Model/Results_ReportAugust/Mode_%s/Scale_%s" % (ao_modes[0], spaxel_scale))
-    # # results_path = os.path.abspath("D:/End to End Model/Monte_Carlo/Nominal/Results/Mode_%s/Scale_%s" % (ao_modes[0], spaxel_scale))
-    # # [*] This is the bit we have to change when you run the analysis in your system [*]
 
-    # First we want to justify the choice of Pupil Sampling.
-    # Comment this out if you want to run the normal analysis
+
+    # # First we want to justify the choice of Pupil Sampling.
+    # # Comment this out if you want to run the normal analysis
+    # # for grating in gratings:
+    # #     pupil_sampling_effect(zosapi=psa, sys_mode=sys_mode, ao_modes=ao_modes, spaxel_scale=spaxel_scale,
+    # #                           spaxels_per_slice=spaxels_per_slice, grating=grating, files_path=files_path, results_path=results_path)
+    #
+    # # This is the core of the analysis. We loop over all spectral bands, calculating the RMS WFE
+    # rms_grating = []
     # for grating in gratings:
-    #     pupil_sampling_effect(zosapi=psa, sys_mode=sys_mode, ao_modes=ao_modes, spaxel_scale=spaxel_scale,
-    #                           spaxels_per_slice=spaxels_per_slice, grating=grating, files_path=files_path, results_path=results_path)
+    #     rms = detector_rms_wfe(zosapi=psa, sys_mode=sys_mode, ao_modes=ao_modes, spaxel_scale=spaxel_scale,
+    #                            spaxels_per_slice=spaxels_per_slice, grating=grating, pupil_sampling=pupil_sampling,
+    #                            files_path=files_path, results_path=results_path)
+    #     rms_grating.append(rms.flatten())
+    #
+    # rms_grating = np.array(rms_grating).T
 
-    # This is the core of the analysis. We loop over all spectral bands, calculating the RMS WFE
-    rms_grating = []
-    for grating in gratings:
-        rms = detector_rms_wfe(zosapi=psa, sys_mode=sys_mode, ao_modes=ao_modes, spaxel_scale=spaxel_scale,
-                               spaxels_per_slice=spaxels_per_slice, grating=grating, pupil_sampling=pupil_sampling,
-                               files_path=files_path, results_path=results_path)
-        rms_grating.append(rms.flatten())
-
-    rms_grating = np.array(rms_grating).T
-
-    # Calculate 5th and 95th percentiles
-    analysis_dir = os.path.join(results_path, 'RMS_WFE')
     # We will save the results in a .txt file
     file_name = 'RMS_WFE_%s_%s_%s_Percentiles.txt' % (sys_mode, ao_modes[0], spaxel_scale)
     with open(os.path.join(analysis_dir, file_name), 'w') as f:
