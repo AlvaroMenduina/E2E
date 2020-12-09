@@ -2142,8 +2142,10 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
             for k in np.arange(1, N_surfaces):
                 surface_names[k] = system.LDE.GetSurfaceAt(k).Comment
             # find the Slicer surface number
-            # slicer_num = list(surface_names.keys())[list(surface_names.values()).index('Slicer Mirror')]
-            slicer_num = list(surface_names.keys())[list(surface_names.values()).index('IFU ISA')]
+            try:
+                slicer_num = list(surface_names.keys())[list(surface_names.values()).index('Slicer Mirror')]
+            except ValueError:
+                slicer_num = list(surface_names.keys())[list(surface_names.values()).index('IFU ISA')]
             slicer = system.LDE.GetSurfaceAt(slicer_num)
 
             # Read Current Aperture Settings

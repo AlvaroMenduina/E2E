@@ -22,6 +22,7 @@ for a given IFU channel in 1 - 1.5 minutes (assuming a pupil sampling N=4, see Z
 
 """
 
+import json
 import os
 import numpy as np
 import e2e_analysis as e2e
@@ -198,9 +199,10 @@ def detector_rms_wfe(zosapi, file_options, spaxels_per_slice, pupil_sampling, fi
         # change the IFU path option
         file_options['IFU_PATH'] = ifu_section
 
-        # read the MC instance number of the specific IFU path
-        ifu_mc = file_options['IFU_PATHS_MC'][ifu_section]
-        file_options['IFU_MC'] = ifu_mc
+        if monte_carlo is True:
+            # read the MC instance number of the specific IFU path
+            ifu_mc = file_options['IFU_PATHS_MC'][ifu_section]
+            file_options['IFU_MC'] = ifu_mc
 
         # options = {'which_system': sys_mode, 'AO_modes': ao_modes, 'scales': [spaxel_scale], 'IFUs': [ifu_section],
         #            'grating': [grating]}
@@ -341,39 +343,30 @@ if __name__ == """__main__""":
               '20x20': 1.0,
               '60x30': 1.0}
 
+    # Nominal requirements for RMS WFE
+    RMS_WFE = {'4x4': 87, '10x10': 134, '20x20': 259, '60x30': 553}
+
     # Create a Python Standalone Application
     psa = e2e.PythonStandaloneApplication()
 
     # [*] Monte Carlo Instances [*]
     ao_mode = 'NOAO'
     spaxel_scale = '60x30'
-    spaxels_per_slice = 5       # How many field points per Slice to use
+    spaxels_per_slice = 10       # How many field points per Slice to use
     pupil_sampling = 4          # N x N grid per pupil quadrant. See Zemax Operand help for RWRE
-    # gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K_SHORT', 'K_LONG']
-    gratings = ['HK']
-    file_options = {'MONTE_CARLO': True, 'AO_MODE': ao_mode, 'SPAX_SCALE': spaxel_scale, 'SLICE_SAMPLING':spaxels_per_slice,
+    gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_SHORT', 'K_LONG']
+    file_options = {'MONTE_CARLO': True, 'AO_MODE': ao_mode, 'SPAX_SCALE': spaxel_scale, 'SLICE_SAMPLING': spaxels_per_slice,
                     'FPRS_MC': '0694', 'IPO_MC': '0055', 'IFU_PATHS_MC': {'AB': '0028', 'CD': '0007'}, 'ISP_MC': '0024'}
 
     files_path = os.path.abspath("D:/End to End Model/Monte_Carlo_Dec/Median")
     results_path = os.path.abspath("D:/End to End Model/Monte_Carlo_Dec/Median/Results/Mode_%s/Scale_%s" % (ao_mode, spaxel_scale))
-
-    import json
-    analysis_dir = os.path.join(results_path, 'RMS_WFE')
-    print("Analysis Results will be saved in folder: ", analysis_dir)
-    if not os.path.exists(analysis_dir):
-        os.mkdir(analysis_dir)
-
-    with open(os.path.join(analysis_dir, 'MC_settings.txt'), 'w') as file:
-        file.write(json.dumps(file_options))
-
-
     # [*] Monte Carlo Instances [*]
 
     # # [*] This is the bit we have to change when you run the analysis in your system [*]
     # sys_mode = 'HARMONI'
     # ao_modes = ['NOAO']
-    # spaxel_scale = '10x10'
-    # spaxels_per_slice = 10       # How many field points per Slice to use
+    # spaxel_scale = '4x4'
+    # spaxels_per_slice = 3       # How many field points per Slice to use
     # pupil_sampling = 4          # N x N grid per pupil quadrant. See Zemax Operand help for RWRE
     # # gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K_SHORT', 'K_LONG']
     # gratings = ['H']
@@ -383,9 +376,20 @@ if __name__ == """__main__""":
     #
     # files_path = os.path.abspath("D:/End to End Model/August_2020")
     # results_path = os.path.abspath("D:/End to End Model/Results_ReportAugust/Mode_%s/Scale_%s" % (ao_modes[0], spaxel_scale))
-    # results_path = os.path.abspath("D:/End to End Model/Monte_Carlo/Nominal/Results/Mode_%s/Scale_%s" % (ao_modes[0], spaxel_scale))
-    # [*] This is the bit we have to change when you run the analysis in your system [*]
+    # # [*] This is the bit we have to change when you run the analysis in your system [*]
 
+    analysis_dir = os.path.join(results_path, 'RMS_WFE')
+    print("Analysis Results will be saved in folder: ", analysis_dir)
+    if not os.path.exists(analysis_dir):
+        os.mkdir(analysis_dir)
+
+    # (1) First of all, we save a txt file with the MC Instances used to generate the E2E files (if running MC mode)
+    # for each of the subsystems, as well as the slice sampling (field points per slice)
+    if file_options['MONTE_CARLO'] is True:
+        with open(os.path.join(analysis_dir, 'MC_settings.txt'), 'w') as file:
+            file.write(json.dumps(file_options))
+
+    # (2) We loop through the list of gratings we will use in this analysis
     rms_grating = []
     for grating in gratings:
         # change the grating option
@@ -416,9 +420,9 @@ if __name__ == """__main__""":
     # rms_grating = np.array(rms_grating).T
 
     # We will save the results in a .txt file
-    file_name = 'RMS_WFE_%s_%s_%s_Percentiles.txt' % (sys_mode, ao_modes[0], spaxel_scale)
+    file_name = 'RMS_WFE_%s_%s_Percentiles.txt' % (ao_mode, spaxel_scale)
     with open(os.path.join(analysis_dir, file_name), 'w') as f:
-        f.write('MODE: %s, AO: %s, Spaxel Scale: %s\n' % (sys_mode, ao_modes[0], spaxel_scale))
+        f.write('AO: %s, Spaxel Scale: %s\n' % (ao_mode, spaxel_scale))
         f.write('Field Points per slice: %d\n' % spaxels_per_slice)
         f.write('Gratings: ')
         f.write(str(gratings))
@@ -436,11 +440,13 @@ if __name__ == """__main__""":
     fig_violin, ax = plt.subplots(1, 1, figsize=(10, 6))
     sns.violinplot(data=data, ax=ax, hue_order=gratings, palette=sns.color_palette("Reds"))
     ax.set_ylabel(r'RMS WFE [nm]')
-    ax.set_title(r'RMS WFE Detector | %s scale | %s %s' % (spaxel_scale, sys_mode, ao_modes[0]))
-    # ax.set_ylim([0, 500])
-    ax.set_ylim(bottom=0)
+    ax.set_title(r'RMS WFE Detector | %s scale | %s' % (spaxel_scale, ao_mode))
+    # We add a line showing the nominal requirement, to see how far away we are
+    ax.axhline(y=RMS_WFE[spaxel_scale], linestyle='-.', color='red')
+    ax.set_ylim([0, 1.15*RMS_WFE[spaxel_scale]])
+    # ax.set_ylim(bottom=0)
 
-    fig_name = "RMS_WFE_DETECTOR_%s_%s_%s_violin" % (spaxel_scale, sys_mode, ao_modes[0])
+    fig_name = "RMS_WFE_DETECTOR_%s_%s_violin" % (spaxel_scale, ao_mode)
     analysis_dir = os.path.join(results_path, 'RMS_WFE')
     if os.path.isfile(os.path.join(analysis_dir, fig_name)):
         os.remove(os.path.join(analysis_dir, fig_name))
@@ -450,10 +456,12 @@ if __name__ == """__main__""":
     fig_box, ax = plt.subplots(1, 1, figsize=(10, 6))
     sns.boxplot(data=data, ax=ax, hue_order=gratings, palette=sns.color_palette("Reds"))
     ax.set_ylabel(r'RMS WFE [nm]')
-    ax.set_title(r'RMS WFE Detector | %s scale | %s %s' % (spaxel_scale, sys_mode, ao_modes[0]))
-    ax.set_ylim(bottom=0)
+    ax.set_title(r'RMS WFE Detector | %s scale | %s' % (spaxel_scale, ao_mode))
+    ax.axhline(y=RMS_WFE[spaxel_scale], linestyle='-.', color='red')
+    ax.set_ylim([0, 1.15*RMS_WFE[spaxel_scale]])
+    # ax.set_ylim(bottom=0)
 
-    fig_name = "RMS_WFE_DETECTOR_%s_%s_%s" % (spaxel_scale, sys_mode, ao_modes[0])
+    fig_name = "RMS_WFE_DETECTOR_%s_%s" % (spaxel_scale, ao_mode)
     analysis_dir = os.path.join(results_path, 'RMS_WFE')
     if os.path.isfile(os.path.join(analysis_dir, fig_name)):
         os.remove(os.path.join(analysis_dir, fig_name))
