@@ -31,7 +31,7 @@ We have implemented a range of custom performance analyses that combine Zemax op
 
 As an example, we can calculate the RMS Wavefront Error map at the detector plane for all 4 IFU channels for a given set of spaxel scale, spectral band, system configuration, etc.
 
-![RMS WFE](images/rms_wfe_map.png?raw=true)
+![RMS WFE](images/RMS.png?raw=true)
 
 or we can display the results using box and whisker plots to compare the RMS Wavefront Error across multiple spectral bands
 
