@@ -12,14 +12,16 @@ Welcome to the **E2E** GitHub repo: a set of performance analysis simulations fo
 
 *Why is this needed?* An E2E model file represents a single instance of HARMONI for a specific choice of system parameters. But HARMONI is a workhorse instrument designed to work over a wide parameters space and has:
 
-* **Spaxel Scales**: 4 indepedent choices of 4x4, 10x10, 20x20, 60x30 [milliarcseconds].
+* **Spaxel Scales**: 4 independent choices of 4x4, 10x10, 20x20, 60x30 [milliarcseconds].
 * **Spectral Bands**: 11 different gratings covering multiple bands VIS, IZJ, IZ, Z_HIGH, J, H, K, HK, H_HIGH, K_LONG, K_SHORT.
 * **Integral Field Unit Channel**: 4 pairs of independent IFU channels AB, CD, EF, GH, each leading to a different spectrograph + detector.
 * **Adaptive Optics modes**: 4 choices of Adapative Optics NOAO, SCAO, LTAO, HCAO (High Contrast).
 
 This means that just for the nominal design, we can create 704 separate E2E files. Consequently, we need a toolbox capable of running a set of performance analyses across many files. Moreover, if we look at Monte Carlo analyses, where each subsystem provides not just its nominal file, but around a hundred random instances, the possibilities are almost endless.
 
-Analysis implemented so far include:
+## A tour of E2E
+
+We have implemented a range of custom performance analyses that combine Zemax operands and Python algorithms to calculate the metrics we need to demonstrate that HARMONI fulfils the requirements:
 
 * **Raytracing** (general): to validate the field definitions along the optical path across all spaxel scales
 * **RMS Wavefront Error**: can be calculated at any arbitrary surface with custom sampling
@@ -38,3 +40,7 @@ or we can display the results using box and whisker plots to compare the RMS Wav
 We can also calculate Spot Diagrams at the detector plane:
 
 ![Spot Diagrams Detector Plane](images/sample_detector_spots.png?raw=true "Detector")
+
+## Monte Carlo capability [**WORK IN PROGRESS**]
+
+One of the more interesting things about the HARMONI instrument is not showing how the *nominal* design performs, but rather how the *as-built* instrument can be expected to perform. For that, we need Monte Carlo instances of each subsystem, representing realistic examples with manufacturing errors, misalignments, surface irregularity and other effects. For that purpose, we are currently adapting the **E2E** package to deal with these Monte Carlo End-to-End models and explore how the performance changes when we include these effects, and understand the range of performance variation that we can expect when HARMONI is finally assembled. 
