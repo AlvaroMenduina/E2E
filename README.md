@@ -19,7 +19,7 @@ Welcome to the **E2E** GitHub repo: a set of performance analysis simulations fo
 
 This means that just for the nominal design, we can create 704 separate E2E files. Consequently, we need a toolbox capable of running a set of performance analyses across many files. Moreover, if we look at Monte Carlo analyses, where each subsystem provides not just its nominal file, but around a hundred random instances, the possibilities are almost endless.
 
-## A tour of E2E
+## A tour of E2E :books:
 
 We have implemented a range of custom performance analyses that combine Zemax operands and Python algorithms to calculate the metrics we need to demonstrate that HARMONI fulfils the requirements:
 
@@ -34,14 +34,9 @@ As an example, we can calculate the RMS Wavefront Error map at the Detector Plan
 
 ![RMS WFE](images/RMS.png?raw=true)
 
-
-or we can display the results using box and whisker plots to compare the RMS Wavefront Error across multiple spectral bands
+To summarise the performance across all spectral bands, we use _violin_ plots like this. They show the distribution of RMS WFE values (from the Detector Maps) along with useful information like the median, the first and third quartiles, etc. This allows us to quickly assess how much margin is left by comparing the distribution to the nominal requirement (red line).
 
 ![Violin](images/violin.png?raw=true "Violin")
-
-We can also calculate Spot Diagrams at the detector plane:
-
-![Spot Diagrams Detector Plane](images/sample_detector_spots.png?raw=true "Detector")
 
 ## Monte Carlo capability [**WORK IN PROGRESS**]
 
