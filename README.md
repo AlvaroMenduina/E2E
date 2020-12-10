@@ -29,9 +29,11 @@ We have implemented a range of custom performance analyses that combine Zemax op
 * **Ensquared Energy**: geometric value in spatial direction
 * **Spot Diagrams**: see example below at the Detector Plane
 
-As an example, we can calculate the RMS Wavefront Error map at the detector plane for all 4 IFU channels for a given set of spaxel scale, spectral band, system configuration, etc.
+### RMS Wavefront Error Maps :chart_with_upwards_trend:
+As an example, we can calculate the RMS Wavefront Error map at the Detector Planes for all 4 IFU channels for a given set of spaxel scale, spectral band, system configuration, etc. The _y_ axis represents the **spectral** direction with varying wavelengths, while the _x_ axis is populated by the different slits. These maps allow us to diagnose whether something is wrong with the E2E models, such as vignetting at intermediate surfaces.
 
 ![RMS WFE](images/RMS.png?raw=true)
+
 
 or we can display the results using box and whisker plots to compare the RMS Wavefront Error across multiple spectral bands
 
