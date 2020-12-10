@@ -17,7 +17,7 @@ Welcome to the **E2E** GitHub repo: a set of performance analysis simulations fo
 * **Integral Field Unit Channel**: 4 pairs of independent IFU channels AB, CD, EF, GH, each leading to a different spectrograph + detector.
 * **Adaptive Optics modes**: 4 choices of Adapative Optics NOAO, SCAO, LTAO, HCAO (High Contrast).
 
-This means that just for the nominal design, we can create 704 separate E2E files. Consequently, we need a toolbox capable of running a set of performance analyses across many files.
+This means that just for the nominal design, we can create 704 separate E2E files. Consequently, we need a toolbox capable of running a set of performance analyses across many files. Moreover, if we look at Monte Carlo analyses, where each subsystem provides not just its nominal file, but around a hundred random instances, the possibilities are almost endless.
 
 Analysis implemented so far include:
 
