@@ -5,7 +5,7 @@
 
 Author: Alvaro Menduina
 Date: July 2020
-Latest version: September 2020
+Latest version: December 2020
 
 Description:
 With this script we calculate the Ensquared Energy at the detector plane
@@ -18,6 +18,7 @@ of the Raytrace for all wavelengths
 
 """
 
+import json
 import os
 import numpy as np
 import e2e_analysis as e2e
@@ -25,7 +26,7 @@ import matplotlib.pyplot as plt
 import matplotlib.tri as tri
 
 
-def detector_ensquared_energy(zosapi, sys_mode, ao_modes, spaxel_scale, grating, N_rays, box_size, files_path, results_path):
+def detector_ensquared_energy(zosapi, file_options, N_rays, box_size, files_path, results_path):
     """
     Calculate the Ensquared Energy at the detector plane for all 4 IFU channels
     The Ensquared Energy is calculated for the Field Point at the centre of the slice
@@ -45,6 +46,11 @@ def detector_ensquared_energy(zosapi, sys_mode, ao_modes, spaxel_scale, grating,
     :return:
     """
 
+    spaxel_scale = file_options['SPAX_SCALE']
+    grating = file_options['GRATING']
+    monte_carlo = file_options['MONTE_CARLO']
+    ao_mode = file_options['AO_MODE']
+
     # We will create a separate folder within results_path to save the results
     analysis_dir = os.path.join(results_path, 'ENSQUARED ENERGY')
     print("Analysis Results will be saved in folder: ", analysis_dir)
@@ -57,17 +63,27 @@ def detector_ensquared_energy(zosapi, sys_mode, ao_modes, spaxel_scale, grating,
     # at least, 3 wavelengths (min, central, max), typically 5 or 7 to get decent sampling at the detector plane
     waves = np.linspace(1, 23, 7).astype(int)
 
-    ifu_sections = ['AB', 'CD', 'EF', 'GH']
+    # ifu_sections = ['AB', 'CD', 'EF', 'GH']
+    ifu_sections = ['AB', 'CD']
     fig, axes = plt.subplots(2, 2, figsize=(15, 10))
 
     for i, ifu in enumerate(ifu_sections):      # Loop over the IFU channels
 
-        # File options to create the appropiate names of the Zemax files we need to load
-        options = {'which_system': sys_mode, 'AO_modes': ao_modes, 'scales': [spaxel_scale], 'IFUs': [ifu],
-                   'grating': [grating]}
-        list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options, results_path=results_path,
+        # change the IFU path option
+        file_options['IFU_PATH'] = ifu
+
+        if monte_carlo is True:
+            # read the MC instance number of the specific IFU path
+            ifu_mc = file_options['IFU_PATHS_MC'][ifu]
+            file_options['IFU_MC'] = ifu_mc
+
+        # # File options to create the appropiate names of the Zemax files we need to load
+        # options = {'which_system': sys_mode, 'AO_modes': ao_modes, 'scales': [spaxel_scale], 'IFUs': [ifu],
+        #            'grating': [grating]}
+
+        list_results = analysis.loop_over_files(files_dir=files_path, files_opt=file_options, results_path=results_path,
                                                 wavelength_idx=waves, configuration_idx=None, N_rays=N_rays,
-                                                box_size=box_size)
+                                                box_size=box_size, monte_carlo=monte_carlo)
 
         # No Monte Carlo so the list_results only contains 1 entry, for the IFU channel
         energy, obj_xy, slicer_xy, detector_xy, wavelengths = list_results[0]
@@ -100,11 +116,11 @@ def detector_ensquared_energy(zosapi, sys_mode, ao_modes, spaxel_scale, grating,
         ax.set_ylabel(axis_label + r' Y [mm]')
         ax.set_aspect('equal')
         plt.colorbar(tpc_odd, ax=ax, orientation='horizontal')
-        title = r'IFU-%s | %s | %s | %s %s | EE min:%.2f max:%.2f' % (ifu, spaxel_scale, grating, sys_mode, ao_modes[0], min_ener, max_ener)
+        title = r'IFU-%s | %s | %s | %s | EE min:%.2f max:%.2f' % (ifu, spaxel_scale, grating, ao_mode, min_ener, max_ener)
         ax.set_title(title)
 
     save_path = os.path.join(results_path, analysis_dir)
-    fig_name = "ENSQ_ENERGY_DETECTOR_%s_SPEC_%s_MODE_%s_%s" % (spaxel_scale, grating, sys_mode, ao_modes[0])
+    fig_name = "ENSQ_ENERGY_DETECTOR_%s_SPEC_%s_MODE_%s" % (spaxel_scale, grating, ao_mode)
     if os.path.isfile(os.path.join(save_path, fig_name)):
         os.remove(os.path.join(save_path, fig_name))
     fig.savefig(os.path.join(save_path, fig_name))
@@ -193,26 +209,52 @@ if __name__ == """__main__""":
     # Create a Python Standalone Application
     psa = e2e.PythonStandaloneApplication()
 
-    # [*] This is the bit we have to change when you run the analysis in your system [*]
-    sys_mode = 'HARMONI'
-    ao_modes = ['NOAO']
-    spaxel_scale = '20x20'
+    # [*] Monte Carlo Instances [*]
+    ao_mode = 'NOAO'
+    spaxel_scale = '10x10'
+    N_rays = 500       # How many rays to trace for the Ensquared  Energy calculation
     # gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_SHORT', 'K_LONG']
-    gratings = ['H']
-    N_rays = 500
-    files_path = os.path.abspath("D:\End to End Model\August_2020")
-    results_path = os.path.abspath("D:\End to End Model\Results_ReportAugust\Mode_%s\Scale_%s" % (ao_modes[0], spaxel_scale))
-    # [*] This is the bit we have to change when you run the analysis in your system [*]
+    gratings = ['VIS']
+    ipo_mcs = {'10x10': '0064', '20x20': '0042'}
+    file_options = {'MONTE_CARLO': True, 'AO_MODE': ao_mode, 'SPAX_SCALE': spaxel_scale,
+                    'FPRS_MC': '0694', 'IPO_MC': ipo_mcs[spaxel_scale], 'ISP_MC': '0024',
+                    'IFU_PATHS_MC': {'AB': '0028', 'CD': '0007'}}
+
+    files_path = os.path.abspath("D:/End to End Model/Monte_Carlo_Dec/Median")
+    results_path = os.path.abspath("D:/End to End Model/Monte_Carlo_Dec/Median/Results/Mode_%s/Scale_%s" % (ao_mode, spaxel_scale))
+    # [*] Monte Carlo Instances [*]
+
+    # # [*] This is the bit we have to change when you run the analysis in your system [*]
+    # sys_mode = 'HARMONI'
+    # ao_modes = ['NOAO']
+    # spaxel_scale = '20x20'
+    # # gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_SHORT', 'K_LONG']
+    # gratings = ['H']
+    # N_rays = 500
+    # files_path = os.path.abspath("D:\End to End Model\August_2020")
+    # results_path = os.path.abspath("D:\End to End Model\Results_ReportAugust\Mode_%s\Scale_%s" % (ao_modes[0], spaxel_scale))
+    # # [*] This is the bit we have to change when you run the analysis in your system [*]
+
+    analysis_dir = os.path.join(results_path, 'ENSQUARED ENERGY')
+    print("Analysis Results will be saved in folder: ", analysis_dir)
+    if not os.path.exists(analysis_dir):
+        os.mkdir(analysis_dir)
+
+    # (1) First of all, we save a txt file with the MC Instances used to generate the E2E files (if running MC mode)
+    # for each of the subsystems, as well as the slice sampling (field points per slice)
+    if file_options['MONTE_CARLO'] is True:
+        with open(os.path.join(analysis_dir, 'MC_settings.txt'), 'w') as file:
+            file.write(json.dumps(file_options))
 
     for grating in gratings:
-
-        detector_ensquared_energy(zosapi=psa, sys_mode=sys_mode, ao_modes=ao_modes, spaxel_scale=spaxel_scale,
-                                  grating=grating, N_rays=N_rays, files_path=files_path, results_path=results_path,
+        # change the grating option
+        file_options['GRATING'] = grating
+        detector_ensquared_energy(zosapi=psa, file_options=file_options, N_rays=N_rays, files_path=files_path, results_path=results_path,
                                   box_size=2.0)
     plt.show()
 
-    for grating in gratings:
-        ensquared_spaxel_size(zosapi=psa, sys_mode=sys_mode, ao_modes=ao_modes, spaxel_scale=spaxel_scale,
-                                  grating=grating, N_rays=N_rays, files_path=files_path, results_path=results_path)
+    # for grating in gratings:
+    #     ensquared_spaxel_size(zosapi=psa, sys_mode=sys_mode, ao_modes=ao_modes, spaxel_scale=spaxel_scale,
+    #                               grating=grating, N_rays=N_rays, files_path=files_path, results_path=results_path)
 
     plt.show()

@@ -2365,7 +2365,6 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
         metadata['Configurations'] = 'All' if configuration_idx is None else configuration_idx
         metadata['Wavelengths'] = 'All' if wavelength_idx is None else wavelength_idx
 
-
         # read the file options
         if monte_carlo is False:
             file_list, sett_list = create_zemax_file_list(which_system=files_opt['which_system'],
@@ -2379,7 +2378,7 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
                                                           IFU_MC_instance=files_opt['IFU_MC'],
                                                           ISP_MC_instance=files_opt['ISP_MC'])
 
-            # Loop over the Zemax files
+        # Loop over the Zemax files
         results = []
         for zemax_file, settings in zip(file_list, sett_list):
 
@@ -2635,7 +2634,7 @@ class EnsquaredEnergyFastAnalysis(AnalysisFast):
         return EE, obj_xy, sli_foc_xy, det_foc_xy
 
     def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
-                        configuration_idx=None, N_rays=500, box_size=2):
+                        configuration_idx=None, N_rays=500, box_size=2, monte_carlo=False):
         """
 
         """
@@ -2653,13 +2652,20 @@ class EnsquaredEnergyFastAnalysis(AnalysisFast):
         metadata['Wavelengths'] = 'All' if wavelength_idx is None else wavelength_idx
 
         # read the file options
-        file_list, file_settings = create_zemax_file_list(which_system=files_opt['which_system'],
-                                                          AO_modes=files_opt['AO_modes'],
-                                                          scales=files_opt['scales'], IFUs=files_opt['IFUs'],
-                                                          grating=files_opt['grating'])
+        if monte_carlo is False:
+            file_list, sett_list = create_zemax_file_list(which_system=files_opt['which_system'],
+                                                          AO_modes=files_opt['AO_modes'], scales=[files_opt['SPAX_SCALE']],
+                                                          IFUs=[files_opt['IFU_PATH']], grating=[files_opt['GRATING']])
+        elif monte_carlo is True:
+            file_list, sett_list = create_zemax_filename_MC(AO_mode=files_opt['AO_MODE'], scale=files_opt['SPAX_SCALE'],
+                                                            IFUpath=files_opt['IFU_PATH'], grating=files_opt['GRATING'],
+                                                            FPRS_MC_instance=files_opt['FPRS_MC'],
+                                                            IPO_MC_instance=files_opt['IPO_MC'],
+                                                            IFU_MC_instance=files_opt['IFU_MC'],
+                                                            ISP_MC_instance=files_opt['ISP_MC'])
 
         results = []
-        for zemax_file, settings in zip(file_list, file_settings):
+        for zemax_file, settings in zip(file_list, sett_list):
 
             # Generate a set of random pupil rays
             px, py = define_pupil_sampling(r_obsc=0.2841, N_rays=N_rays, mode='random')
@@ -2676,8 +2682,8 @@ class EnsquaredEnergyFastAnalysis(AnalysisFast):
             # Post-Processing the results
             file_name = zemax_file.split('.')[0]
             settings['surface'] = 'DETECTOR'
-            self.save_hdf5(analysis_name='ENSQ_ENERG', analysis_metadata=metadata, list_results=list_results,
-                           results_names=results_names, file_name=file_name, file_settings=settings, results_dir=results_path)
+            # self.save_hdf5(analysis_name='ENSQ_ENERG', analysis_metadata=metadata, list_results=list_results,
+            #                results_names=results_names, file_name=file_name, file_settings=settings, results_dir=results_path)
 
         return results
 
