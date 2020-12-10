@@ -37,7 +37,7 @@ As an example, we can calculate the RMS Wavefront Error map at the Detector Plan
 
 or we can display the results using box and whisker plots to compare the RMS Wavefront Error across multiple spectral bands
 
-![BoxRMS](images/boxplot.png?raw=true "Boxplot")
+![Violin](images/violin.png?raw=true "Violin")
 
 We can also calculate Spot Diagrams at the detector plane:
 
