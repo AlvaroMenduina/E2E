@@ -1,6 +1,15 @@
-# E2E - HARMONI End-to-End Model Performance Analysis
+# E2E - HARMONI End-to-End Model Performance Analysis :octocat:
 
-A set of performance analysis simulations for the HARMONI End-to-End Model, an optical model of the complete system including all subsystem: Focal Plane Relay System, Preoptics, Integral Field Unit, Spectrograph, Detectors.
+Welcome to the **E2E** GitHub repo: a set of performance analysis simulations for the HARMONI End-to-End Model, an optical model of the complete system including all subsystems: Focal Plane Relay System, Preoptics, Integral Field Unit, Spectrograph, Detectors :telescope:. This repo contains Python code that uses the Zemax Optics Studio (ZOS) API to analyse the HARMONI E2E files.
+
+## What do we want to achieve? (*rationale*)
+
+*What are the End-to-End Models?* The E2E models are optical models in Zemax Optics Studio that represent the complete HARMONI instrument. They are created by joining together optical models of each subsystem provided by different teams within the [HARMONI consortium](https://auditore.cab.inta-csic.es/harmoni/consortium/) all across Europe :gb: :es: :fr: :de:. One of the main roles of the E2E models is to _demonstrate that the performance of HARMONI will meet the requirements_.
+
+Given the complexity of the HARMONI instrument.
+
+## This project is still under construction 🚧
+
 
 Using the Zemax Optics Studio (ZOS) API in Python we analyse the E2E Zemax files for HARMONI across:
 
