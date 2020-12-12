@@ -2688,196 +2688,7 @@ class EnsquaredEnergyFastAnalysis(AnalysisFast):
         return results
 
 
-class PSFDynamic(AnalysisFast):
-    """
 
-    """
-
-    def calculate_fwhm(self, surface, xy_data, PSF_window, N_points, spaxel_scale, wavelength):
-
-        # (1) Calculate the Geometric PSF
-        x, y = xy_data[:, 0], xy_data[:, 1]
-        cent_x, cent_y = np.mean(x), np.mean(y)
-
-        std_x, std_y = np.std(x), np.std(y)
-        bandwidth = min(std_x, std_y)
-        kde = KernelDensity(kernel='gaussian', bandwidth=bandwidth).fit(xy_data)
-
-        # define a grid to compute the PSF
-        xmin, xmax = cent_x - PSF_window/2/1000, cent_x + PSF_window/2/1000
-        ymin, ymax = cent_y - PSF_window/2/1000, cent_y + PSF_window/2/1000
-        x_grid = np.linspace(xmin, xmax, N_points)
-        y_grid = np.linspace(ymin, ymax, N_points)
-        xx_grid, yy_grid = np.meshgrid(x_grid, y_grid)
-        xy_grid = np.vstack([xx_grid.ravel(), yy_grid.ravel()]).T
-        log_scores = kde.score_samples(xy_grid)
-
-        psf_geo = np.exp(log_scores)
-        psf_geo /= np.max(psf_geo)
-        psf_geo = psf_geo.reshape(xx_grid.shape)
-
-        # (2) Calculate the Diffraction PSF
-        psf_diffr = diffraction.add_diffraction(surface=surface, psf_geo=psf_geo, PSF_window=PSF_window,
-                                                scale_mas=spaxel_scale, wavelength=wavelength)
-
-        # collapse the PSF in X to get a Y profile
-        psf_y = np.sum(psf_diffr, axis=1)
-        psf_y /= np.max(psf_y)
-
-        plt.figure()
-        plt.imshow(psf_diffr, cmap='plasma', extent=[xmin, xmax, ymin, ymax])
-        plt.colorbar()
-
-        # the X coordinate at which the PSF has the peak
-        i_peak = np.argwhere(psf_diffr == 1.0)[0, 0]
-        y_profile = psf_diffr[i_peak, :]
-
-        plt.figure()
-        plt.plot(psf_y, y_grid)
-        # plt.plot(y_grid, y_profile)
-        plt.show()
-
-        return
-
-    def analysis_function_dynamic(self, system, wavelength_idx, surface, config, px, py, spaxel_scale, N_points):
-
-        # Set Current Configuration
-        system.MCE.SetCurrentConfiguration(config)
-
-        # First of all, we need to find the Surface Number for the IMAGE SLICER "Image Plane"
-        N_surfaces = system.LDE.NumberOfSurfaces
-        surface_names = {}  # A dictionary of surface number -> surface comment
-        for k in np.arange(1, N_surfaces):
-            surface_names[k] = system.LDE.GetSurfaceAt(k).Comment
-        # find the Slicer surface number
-        try:
-            slicer_num = list(surface_names.keys())[list(surface_names.values()).index('Image Plane')]
-        except ValueError:
-            slicer_num = list(surface_names.keys())[list(surface_names.values()).index('Image plane')]
-        slicer_surface = slicer_num
-
-        # Get the Field Points for that configuration
-        sysField = system.SystemData.Fields
-        N_fields = sysField.NumberOfFields
-        N_waves = len(wavelength_idx)
-
-        X_MAX = np.max([np.abs(sysField.GetField(i + 1).X) for i in range(N_fields)])
-        Y_MAX = np.max([np.abs(sysField.GetField(i + 1).Y) for i in range(N_fields)])
-
-        # Use the Field Point at the centre of the Slice
-        fx, fy = sysField.GetField(2).X, sysField.GetField(2).Y
-        hx, hy = fx / X_MAX, fy / Y_MAX  # Normalized field coordinates (hx, hy)
-        obj_xy = np.array([fx, fy])
-
-        N_pupil = px.shape[0]   # Number of rays in the Pupil for a given field point and wavelength
-        N_rays = N_waves * N_pupil
-
-        FWHM = np.zeros((N_waves, 2))
-        foc_xy = np.zeros((N_waves, 2))
-
-        slicer_xy = np.empty((N_waves, N_pupil, 2))
-        slicer_xy[:] = np.nan
-        detector_xy = np.empty((N_waves, N_pupil, 2))
-        detector_xy[:] = np.nan
-
-        # (1) Run the raytrace up to the IMAGE SLICER
-        raytrace = system.Tools.OpenBatchRayTrace()
-        # remember to specify the surface to which you are tracing!
-        rays_slicer = raytrace.CreateNormUnpol(N_rays, constants.RaysType_Real, slicer_surface)
-
-        # Loop over all wavelengths
-        for i_wave, wave_idx in enumerate(wavelength_idx):
-
-            for (p_x, p_y) in zip(px, py):  # Add the ray to the RayTrace
-                rays_slicer.AddRay(wave_idx, hx, hy, p_x, p_y, constants.OPDMode_None)
-
-        CastTo(raytrace, 'ISystemTool').RunAndWaitForCompletion()
-        rays_slicer.StartReadingResults()
-        checksum_slicer = 0
-        for k in range(N_rays):  # Get Raytrace results at the Image Slicer
-            i_wave = k // N_pupil
-            j_pupil = k % N_pupil
-            # print(i_wave, j_pupil)
-            output = rays_slicer.ReadNextResult()
-            if output[2] == 0:
-                slicer_xy[i_wave, j_pupil, 0] = output[4]
-                slicer_xy[i_wave, j_pupil, 1] = output[5]
-                checksum_slicer += 1
-        if checksum_slicer < N_rays:
-            raise ValueError('Some rays were lost before the Image Slicer')
-
-        rays_slicer.ClearData()
-
-        # FWHM
-
-        windows = {4.0: [5000, 200], 60.0: [500, 50]}
-        win_slicer = windows[spaxel_scale][0]
-        win_detect = windows[spaxel_scale][1]
-        if config == 1:
-            print("Sampling the Image Slicer plane with %d points: %.3f microns / point" % (N_points, (win_slicer / N_points)))
-
-
-        for i_wave, wave_idx in enumerate(wavelength_idx):
-
-            xy_data_slicer = slicer_xy[i_wave]
-            wavelength = system.SystemData.Wavelengths.GetWavelength(wave_idx).Wavelength
-            self.calculate_fwhm(surface='IS', xy_data=xy_data_slicer, PSF_window=win_slicer,
-                                                               N_points=N_points, spaxel_scale=spaxel_scale,
-                                                               wavelength=wavelength)
-
-            # xy_data_detector = detector_xy[i_wave]
-            # fwhm_x_det, fwhm_y_det = self.calculate_fwhm(surface='DET', xy_data=xy_data_detector, PSF_window=win_detect,
-            #                                              N_points=N_points, spaxel_scale=spaxel_scale,
-            #                                              wavelength=wavelength)
-            #
-            # # plt.show()
-            #
-            # foc_xy[i_wave] = [np.mean(xy_data_detector[:, 0]), np.mean(xy_data_detector[:, 1])]
-            #
-            # FWHM[i_wave] = [fwhm_x_det, fwhm_y_slicer]
-            #
-            # if config == 1:
-            #     print("%.3f microns" % wavelength)
-            #     print("FWHM in X [Detector]: %.1f microns | in Y [Image Slicer]: %.2f microns " % (fwhm_x_det, fwhm_y_slicer))
-            #
-        return []
-
-    def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
-                        configuration_idx=None, N_rays=500, N_points=50):
-        """
-
-        """
-
-        # We want the result to produce as output: the RMS WFE array, and the RayTrace at both Object and Focal plane
-        results_names = ['FWHM', 'OBJ_XY', 'FOC_XY']
-        # we need to give the shapes of each array to self.run_analysis
-        N_waves = 23 if wavelength_idx is None else len(wavelength_idx)
-        results_shapes = [(N_waves, 2,), (2,), (N_waves, 2,)]
-
-        px, py = define_pupil_sampling(r_obsc=0.2841, N_rays=N_rays, mode='random')
-        print("Using %d rays" % N_rays)
-
-        # read the file options
-        file_list, sett_list = create_zemax_file_list(which_system=files_opt['which_system'], AO_modes=files_opt['AO_modes'],
-                                           scales=files_opt['scales'], IFUs=files_opt['IFUs'], grating=files_opt['grating'])
-
-        results = []
-        for zemax_file, settings in zip(file_list, sett_list):
-
-            # Clear the Cache for the Airy Pattern function
-            airy_and_slicer.cache_clear()
-
-            mas_dict = {'4x4': 4.0, '10x10': 10.0, '20x20': 20.0, '60x30': 60.0}
-            spaxel_scale = mas_dict[settings['scale']]
-
-            list_results = self.run_analysis(analysis_function=self.analysis_function_dynamic,
-                                             files_dir=files_dir, zemax_file=zemax_file, results_path=results_path,
-                                             results_shapes=results_shapes, results_names=results_names,
-                                             wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
-                                             px=px, py=py, spaxel_scale=spaxel_scale, N_points=N_points)
-            results.append(list_results)
-
-        return results
 
 class FWHM_PSF_FastAnalysis(AnalysisFast):
     """
@@ -3279,465 +3090,207 @@ class CommonWavelengthRange(AnalysisFast):
 
         return results
 
-# ==================================================================================================================== #
-#                            OLD ANALYSES - Feel free to copy / use as inspiration if needed                           #
-# ==================================================================================================================== #
 
-# The following analyses are very old and were hardly ever used so they might need maintenance
-# but could serve as a starting point for the future, if someone needs to implement new analyses
+### ================================================================================================================ ###
+#
+### ================================================================================================================ ###
 
-class SpotDiagramAnalysis(AnalysisGeneric):
 
-    # NOTE: we stop using this Analysis very early on (might need maintenance) but feel free to copy / adapt
 
+
+# TODO: implement the PSF Dynamic Effects analysis
+class PSFDynamic(AnalysisFast):
     """
-    Example of a custom analysis - Spot Diagrams
-
-    This is how it works:
-        - We inherit the AnalysisGeneric class
-        - We define analysis_function_spot_diagram as the 'analysis_function'
-        - self.run_analysis will loop over Wavelengths and Configurations calling analysis_function_spot_diagram
-        - self.loop_over_files will loop over the E2E model files, calling run_analysis and saving plots
 
     """
 
-    @staticmethod
-    def analysis_function_spot_diagram(system, wave_idx, config, field, surface, N_rays):
-        """
-        Calculate the Spot Diagram for a given Wavelength number and Configuration
-        for a list of Field Points (field), at a specific Surface
+    def calculate_fwhm(self, surface, xy_data, PSF_window, N_points, spaxel_scale, wavelength):
 
-        For the Pupil Sampling we do the following
-        we sample with a rectangular grid for P_x between [-1, 1] with N_rays
-        which gives an XY grid for (P_x, P_y) with a total of N_rays^2
-        Obviously, some rays lie outside the pupil (P_x ^ 2 + P_y ^ 2) > 1
-        so those rays are ignored in the Ray Tracing. We only trace meaningful rays!
-
-        But in order to avoid the further complication of finding out how many rays
-        actually make sense, which will change as a function of the N_rays we choose
-        and would force us to adapt the size of the arrays a posteriori
-        we always keep the results as [N_rays ^ 2] in size, and fill with NaN
-        those rays which will not be traced.
-        This is not a problem because Python deals with NaN values very well.
-        We have np.nanmax(), np.nanmean() functions, and the Spot Diagram plots
-        will automatically ignore any NaN value.
-
-        This function will return a list of arrays, containing a single entry
-        an array of shape [N_fields, N_rays^2, 2] containing the (X, Y) coordinates
-        of each ray for each field
-
-        :param system: a system loaded with the Python Standalone Application
-        :param wave_idx: Zemax wavelength number
-        :param config: Zemax configuration number
-        :param field: a list of Zemax field point numbers
-        :param surface: Zemax surface number
-        :param N_rays: Number of rays along the P_x [-1, 1] line. Total rays = N_rays ^ 2
-        :return:
-        """
-
-        # Set Current Configuration
-        system.MCE.SetCurrentConfiguration(config)
-
-        # Get the Field Points for that configuration
-        sysField = system.SystemData.Fields
-        if sysField.Normalization != constants.FieldNormalizationType_Radial:
-            sysField.Normalization = constants.FieldNormalizationType_Radial
-
-        N_fields = sysField.NumberOfFields
-
-        # Loop over the fields to get the Normalization Radius
-        r_max = np.max([np.sqrt(sysField.GetField(i).X ** 2 +
-                                sysField.GetField(i).Y ** 2) for i in np.arange(1, N_fields + 1)])
-
-        # Pupil Rays
-        px = np.linspace(-1, 1, N_rays, endpoint=True)
-        pxx, pyy = np.meshgrid(px, px)
-        pupil_mask = np.sqrt(pxx**2 + pyy**2) <= 1.0
-        px, py = pxx[pupil_mask], pyy[pupil_mask]
-        # How many rays are actually inside the pupil aperture?
-        N_rays_inside = px.shape[0]
-
-        XY = np.empty((len(field), N_rays ** 2, 2))
-        XY[:] = np.NaN          # Fill it with Nan so we can discard the rays outside the pupil
-
-        # Loop over each Field computing the Spot Diagram
-        for j, field_idx in enumerate(field):
-
-            fx, fy = sysField.GetField(field_idx).X, sysField.GetField(field_idx).Y
-            hx, hy = fx / r_max, fy / r_max      # Normalized field coordinates (hx, hy)
-
-            raytrace = system.Tools.OpenBatchRayTrace()
-            # remember to specify the surface to which you are tracing!
-            normUnPolData = raytrace.CreateNormUnpol(N_rays_inside, constants.RaysType_Real, surface)
-
-            for (p_x, p_y) in zip(px, py):
-                # Add the ray to the RayTrace
-                normUnPolData.AddRay(wave_idx, hx, hy, p_x, p_y, constants.OPDMode_None)
-
-            # Run the RayTrace for the whole Slice
-            CastTo(raytrace, 'ISystemTool').RunAndWaitForCompletion()
-            normUnPolData.StartReadingResults()
-            for i in range(N_rays_inside):
-                output = normUnPolData.ReadNextResult()
-                if output[2] == 0 and output[3] == 0:
-                    XY[j, i, 0] = output[4]
-                    XY[j, i, 1] = output[5]
-
-            normUnPolData.ClearData()
-            CastTo(raytrace, 'ISystemTool').Close()
-
-        # It is extremely important to output a LIST of arrays even if you only need 1 array
-        # Otherwise, if you only have 1 result array, the reading of the results in run_analysis
-        # will loop over the first axis and Python will broadcast incorrectly
-
-        return [XY]
-
-    def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
-                        configuration_idx=None, surface=None, field=(1,), N_rays=20, plot_mode='Fields'):
-
-
-        N_fields = len(field)
-        results_names = ['XY']
-        results_shapes = [(N_fields, N_rays**2, 2)]             # [N_fields, N_rays^2, (x,y)]
-
-        # read the file options
-        file_list, settings = create_zemax_file_list(which_system=files_opt['which_system'], AO_modes=files_opt['AO_modes'],
-                                           scales=files_opt['scales'], IFUs=files_opt['IFUs'], grating=files_opt['grating'])
-
-        for zemax_file in file_list:
-
-            file_name = zemax_file.split('.')[0]
-
-            list_results = self.run_analysis(analysis_function=self.analysis_function_spot_diagram,
-                                             files_dir=files_dir, zemax_file=zemax_file, results_path=results_path,
-                                             results_shapes=results_shapes, results_names=results_names,
-                                             wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
-                                             surface=surface, field=field, N_rays=N_rays)
-
-            xy, wavelengths = list_results
-
-            if plot_mode == 'Fields':
-                self.plot_fields(xy, wavelengths, wavelength_idx, configuration_idx, field,
-                                 surface, file_name, results_path)
-
-            return
-
-    def plot_fields(self, xy, wavelengths, wavelength_idx, configuration_idx, fields, surface, file_name, result_path,
-                    scale=5, cmap=cm.Reds):
-
-        file_dir = os.path.join(result_path, file_name)
-        spot_dir = os.path.join(file_dir, 'SPOT_DIAGRAM_FIELDS')
-        if not os.path.exists(spot_dir):
-            os.mkdir(spot_dir)           # If not, create the directory to store results
-
-        # xy has shape [N_waves, N_configs, N_fields, N_rays^2, 2]
-        N_waves, N_configs = xy.shape[0], xy.shape[1]
-        N_fields = len(fields)
-        colors = cmap(np.linspace(0.5, 1.0, N_waves))
-
-        if wavelength_idx is None:
-            wavelength_idx = np.arange(1, N_waves + 1)
-        if surface is None:
-            surface = '_IMG'
-
-        for i in range(N_waves):
-            wave = wavelengths[i]
-            wave_idx = wavelength_idx[i]
-            for j in range(N_configs):
-                config = configuration_idx[j]
-
-                fig_name = file_name + '_SPOTDIAG_SURF' + str(surface) + '_WAVE%d' % wave_idx + '_CONFIG%d' % config
-                data = xy[i, j]
-
-                deltax = max([np.nanmax(np.abs(data[k, :, 0] - np.nanmean(data[k, :, 0]))) for k in range(N_fields)])
-                deltay = max([np.nanmax(np.abs(data[k, :, 1] - np.nanmean(data[k, :, 1]))) for k in range(N_fields)])
-                xmax = 1.2 * max(deltax, deltay)        # some oversizing
-                fig, axes = plt.subplots(1, N_fields, figsize=(scale*N_fields, scale))
-                alpha = np.linspace(0.5, 1.0, N_fields)
-                for k in range(N_fields):
-                    ax = axes[k]
-                    ax.set_aspect('equal')
-                    x, y = data[k, :, 0], data[k, :, 1]
-                    mx, my = np.nanmean(x), np.nanmean(y)
-                    dx, dy = x - mx, y - my
-                    ax.scatter(dx, dy, s=3, color=colors[i], alpha=alpha[k])
-                    ax.set_title('Field #%d ($\lambda$: %.4f $\mu$m, cfg: %d)' % (fields[k], wave, config))
-                    ax.set_xlabel(r'X [$\mu$m]')
-                    ax.set_ylabel(r'Y [$\mu$m]')
-                    ax.set_xlim([-xmax, xmax])
-                    ax.set_ylim([-xmax, xmax])
-                    if k > 0:
-                        ax.get_yaxis().set_visible(False)
-
-                if os.path.isfile(os.path.join(spot_dir, fig_name)):
-                    os.remove(os.path.join(spot_dir, fig_name))
-                fig.savefig(os.path.join(spot_dir, fig_name))
-        plt.show(block=False)
-        plt.pause(0.5)
-        plt.close('all')
-
-        return
-
-
-class SpotDiagramDetector(AnalysisGeneric):
-
-    def analysis_functions_spots(self, system, wave_idx, config, surface, N_rays, reference='ChiefRay'):
-
-        # colors = cm.Reds(np.linspace(0.5, 1, 23))
-        # color = colors[wave_idx - 1]
-
-
-        # Set Current Configuration
-        system.MCE.SetCurrentConfiguration(config)
-
-        # Get the Field Points for that configuration
-        sysField = system.SystemData.Fields
-
-        N_fields = sysField.NumberOfFields
-        # check that the field is normalized correctly
-        if sysField.Normalization != constants.FieldNormalizationType_Radial:
-            sysField.Normalization = constants.FieldNormalizationType_Radial
-
-        # Loop over the fields to get the Normalization Radius
-        r_max = np.max([np.sqrt(sysField.GetField(i).X ** 2 +
-                                sysField.GetField(i).Y ** 2) for i in np.arange(1, N_fields + 1)])
-
-        # Pupil Rays
-        px = np.linspace(-1, 1, N_rays, endpoint=True)
-        pxx, pyy = np.meshgrid(px, px)
-        pupil_mask = np.sqrt(pxx**2 + pyy**2) <= 1.0
-        px, py = pxx[pupil_mask], pyy[pupil_mask]
-        # How many rays are actually inside the pupil aperture?
-        N_rays_inside = px.shape[0]
-
-        XY = np.empty((1, N_rays_inside + 1, 2))     # Rays inside plus 1 for the chief ray extra
-
-        obj_xy = np.zeros((1, 2))        # (fx, fy) coordinates
-        foc_xy = np.empty((1, 2))        # raytrace results of the Centroid
-
-        if config == 1:
-            print("\nTracing %d rays to calculate FWHM PSF" % (N_rays_inside))
-
-        # fig, axes = plt.subplots(1, N_fields)
-
-        # Loop over each Field computing the Spot Diagram
-
-
-        fx, fy = sysField.GetField(2).X, sysField.GetField(2).Y
-        hx, hy = fx / r_max, fy / r_max      # Normalized field coordinates (hx, hy)
-
-        j = 0
-        obj_xy[j, :] = [fx, fy]
-
-        raytrace = system.Tools.OpenBatchRayTrace()
-        # remember to specify the surface to which you are tracing!
-        normUnPolData = raytrace.CreateNormUnpol(N_rays_inside + 1, constants.RaysType_Real, surface)
-
-        # Add the Chief Ray
-        normUnPolData.AddRay(wave_idx, hx, hy, 0.0, 0.0, constants.OPDMode_None)
-
-        for (p_x, p_y) in zip(px, py):
-            # Add the ray to the RayTrace
-            normUnPolData.AddRay(wave_idx, hx, hy, p_x, p_y, constants.OPDMode_None)
-
-        # Run the RayTrace for the whole Slice
-        CastTo(raytrace, 'ISystemTool').RunAndWaitForCompletion()
-        normUnPolData.StartReadingResults()
-        for i in range(N_rays_inside + 1):
-            output = normUnPolData.ReadNextResult()
-            if output[2] == 0 and output[3] == 0:
-                XY[j, i, 0] = output[4]
-                XY[j, i, 1] = output[5]
-
-        normUnPolData.ClearData()
-        CastTo(raytrace, 'ISystemTool').Close()
-
-        x, y = XY[j, :, 0], XY[j, :, 1]
-        chief_x, chief_y = x[0], y[0]           # We added the Chief Ray first to the BatchTrace
+        # (1) Calculate the Geometric PSF
+        x, y = xy_data[:, 0], xy_data[:, 1]
         cent_x, cent_y = np.mean(x), np.mean(y)
 
-        # Select what point will be used as Reference for the FWHM
-        if reference == "Centroid":
-            ref_x, ref_y = cent_x, cent_y
-        elif reference == "ChiefRay":
-            ref_x, ref_y = chief_x, chief_y
-        else:
-            raise ValueError("reference should be 'ChiefRay' or 'Centroid'")
+        std_x, std_y = np.std(x), np.std(y)
+        bandwidth = min(std_x, std_y)
+        kde = KernelDensity(kernel='gaussian', bandwidth=bandwidth).fit(xy_data)
 
-        # Add the Reference Point to the Focal Plane Raytrace results
-        foc_xy[j, :] = [ref_x, ref_y]
+        # define a grid to compute the PSF
+        xmin, xmax = cent_x - PSF_window/2/1000, cent_x + PSF_window/2/1000
+        ymin, ymax = cent_y - PSF_window/2/1000, cent_y + PSF_window/2/1000
+        x_grid = np.linspace(xmin, xmax, N_points)
+        y_grid = np.linspace(ymin, ymax, N_points)
+        xx_grid, yy_grid = np.meshgrid(x_grid, y_grid)
+        xy_grid = np.vstack([xx_grid.ravel(), yy_grid.ravel()]).T
+        log_scores = kde.score_samples(xy_grid)
 
-        # # Calculate the contours
-        # x, y = XY[j, :, 0], XY[j, :, 1]
-        #
-        # mx, my = np.mean(x), np.mean(y)
-        # dx, dy = 1000*(x - mx), 1000*(y - my)       # in microns
-        # ax = axes[j]
-        # ax.scatter(dx, dy, s=3, color=color)
-        # # ax.set_xlabel(r'X [mm]')
-        # # ax.set_ylabel(r'X [mm]')
-        # ax.set_xlim([-25, 25])
-        # ax.set_ylim([-25, 25])
-        # ax.set_xticklabels([])
-        # ax.set_yticklabels([])
-        # ax.set_aspect('equal')
-        # ax.xaxis.set_visible('False')
-        # ax.yaxis.set_visible('False')
+        psf_geo = np.exp(log_scores)
+        psf_geo /= np.max(psf_geo)
+        psf_geo = psf_geo.reshape(xx_grid.shape)
 
-        return [XY, obj_xy, foc_xy]
+        # (2) Calculate the Diffraction PSF
+        psf_diffr = diffraction.add_diffraction(surface=surface, psf_geo=psf_geo, PSF_window=PSF_window,
+                                                scale_mas=spaxel_scale, wavelength=wavelength)
 
-    def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
-                        configuration_idx=None, surface=None, N_rays=40, reference='ChiefRay'):
-        """
+        # collapse the PSF in X to get a Y profile
+        psf_y = np.sum(psf_diffr, axis=1)
+        psf_y /= np.max(psf_y)
 
-        """
+        plt.figure()
+        plt.imshow(psf_diffr, cmap='plasma', extent=[xmin, xmax, ymin, ymax])
+        plt.colorbar()
 
-        # We need to know how many rays are inside the pupil
-        px = np.linspace(-1, 1, N_rays, endpoint=True)
-        pxx, pyy = np.meshgrid(px, px)
-        pupil_mask = np.sqrt(pxx ** 2 + pyy ** 2) <= 1.0
-        px, py = pxx[pupil_mask], pyy[pupil_mask]
-        # How many rays are actually inside the pupil aperture?
-        N_rays_inside = px.shape[0]
+        # the X coordinate at which the PSF has the peak
+        i_peak = np.argwhere(psf_diffr == 1.0)[0, 0]
+        y_profile = psf_diffr[i_peak, :]
 
-        # We want the result to produce as output: the RMS WFE array, and the RayTrace at both Object and Focal plane
-        results_names = ['XY', 'OBJ_XY', 'FOC_XY']
-        # we need to give the shapes of each array to self.run_analysis
-        results_shapes = [(1, N_rays_inside + 1, 2), (1, 2), (1, 2)]
+        plt.figure()
+        plt.plot(psf_y, y_grid)
+        # plt.plot(y_grid, y_profile)
+        plt.show()
 
-        # read the file options
-        file_list, settings = create_zemax_file_list(which_system=files_opt['which_system'], AO_modes=files_opt['AO_modes'],
-                                           scales=files_opt['scales'], IFUs=files_opt['IFUs'], grating=files_opt['grating'])
+        return
 
-        for zemax_file in file_list:
-
-            list_results = self.run_analysis(analysis_function=self.analysis_functions_spots,
-                                             files_dir=files_dir,zemax_file=zemax_file, results_path=results_path,
-                                             results_shapes=results_shapes, results_names=results_names,
-                                             wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
-                                             surface=surface, N_rays=N_rays, reference=reference)
-
-            return list_results
-
-
-
-class RMSSpotAnalysis(AnalysisGeneric):
-
-    @staticmethod
-    def analysis_function_rms_spot(system, wave_idx, config, surface, field,
-                                   reference='Centroid', mode='RMS', ray_density=10):
-
-        N_fields = len(field)
-        spots = np.zeros(N_fields)
+    def analysis_function_dynamic(self, system, wavelength_idx, surface, config, px, py, spaxel_scale, N_points):
 
         # Set Current Configuration
         system.MCE.SetCurrentConfiguration(config)
 
-        # Create Spot Diagram analysis
-        spot = system.Analyses.New_Analysis(constants.AnalysisIDM_StandardSpot)
-        spot_setting = spot.GetSettings()
-        baseSetting = CastTo(spot_setting, 'IAS_Spot')
-        baseSetting.Field.SetFieldNumber(0)                     # 0 means All Field Points
-        baseSetting.Wavelength.SetWavelengthNumber(wave_idx)    # set the Wavelength
-        baseSetting.RayDensity = ray_density                    # set the Ray Density
+        # First of all, we need to find the Surface Number for the IMAGE SLICER "Image Plane"
+        N_surfaces = system.LDE.NumberOfSurfaces
+        surface_names = {}  # A dictionary of surface number -> surface comment
+        for k in np.arange(1, N_surfaces):
+            surface_names[k] = system.LDE.GetSurfaceAt(k).Comment
+        # find the Slicer surface number
+        try:
+            slicer_num = list(surface_names.keys())[list(surface_names.values()).index('Image Plane')]
+        except ValueError:
+            slicer_num = list(surface_names.keys())[list(surface_names.values()).index('Image plane')]
+        slicer_surface = slicer_num
 
-        if reference == 'Centroid':
-            baseSetting.ReferTo = constants.ReferTo_Centroid
-        elif reference == 'ChiefRay':
-            baseSetting.ReferTo = constants.ReferTo_ChiefRay
+        # Get the Field Points for that configuration
+        sysField = system.SystemData.Fields
+        N_fields = sysField.NumberOfFields
+        N_waves = len(wavelength_idx)
 
-        base = CastTo(spot, 'IA_')
-        base.ApplyAndWaitForCompletion()
+        X_MAX = np.max([np.abs(sysField.GetField(i + 1).X) for i in range(N_fields)])
+        Y_MAX = np.max([np.abs(sysField.GetField(i + 1).Y) for i in range(N_fields)])
 
-        # Get Results
-        spot_results = base.GetResults()
-        for i, f in enumerate(field):
-            if mode == 'RMS':
-                spots[i] = spot_results.SpotData.GetRMSSpotSizeFor(f, wave_idx)
-            elif mode == 'GEO':
-                spots[i] = spot_results.SpotData.GetGeoSpotSizeFor(f, wave_idx)
+        # Use the Field Point at the centre of the Slice
+        fx, fy = sysField.GetField(2).X, sysField.GetField(2).Y
+        hx, hy = fx / X_MAX, fy / Y_MAX  # Normalized field coordinates (hx, hy)
+        obj_xy = np.array([fx, fy])
 
-        spot.Close()
+        N_pupil = px.shape[0]   # Number of rays in the Pupil for a given field point and wavelength
+        N_rays = N_waves * N_pupil
 
-        return [spots]
+        FWHM = np.zeros((N_waves, 2))
+        foc_xy = np.zeros((N_waves, 2))
+
+        slicer_xy = np.empty((N_waves, N_pupil, 2))
+        slicer_xy[:] = np.nan
+        detector_xy = np.empty((N_waves, N_pupil, 2))
+        detector_xy[:] = np.nan
+
+        # (1) Run the raytrace up to the IMAGE SLICER
+        raytrace = system.Tools.OpenBatchRayTrace()
+        # remember to specify the surface to which you are tracing!
+        rays_slicer = raytrace.CreateNormUnpol(N_rays, constants.RaysType_Real, slicer_surface)
+
+        # Loop over all wavelengths
+        for i_wave, wave_idx in enumerate(wavelength_idx):
+
+            for (p_x, p_y) in zip(px, py):  # Add the ray to the RayTrace
+                rays_slicer.AddRay(wave_idx, hx, hy, p_x, p_y, constants.OPDMode_None)
+
+        CastTo(raytrace, 'ISystemTool').RunAndWaitForCompletion()
+        rays_slicer.StartReadingResults()
+        checksum_slicer = 0
+        for k in range(N_rays):  # Get Raytrace results at the Image Slicer
+            i_wave = k // N_pupil
+            j_pupil = k % N_pupil
+            # print(i_wave, j_pupil)
+            output = rays_slicer.ReadNextResult()
+            if output[2] == 0:
+                slicer_xy[i_wave, j_pupil, 0] = output[4]
+                slicer_xy[i_wave, j_pupil, 1] = output[5]
+                checksum_slicer += 1
+        if checksum_slicer < N_rays:
+            raise ValueError('Some rays were lost before the Image Slicer')
+
+        rays_slicer.ClearData()
+
+        # FWHM
+
+        windows = {4.0: [5000, 200], 60.0: [500, 50]}
+        win_slicer = windows[spaxel_scale][0]
+        win_detect = windows[spaxel_scale][1]
+        if config == 1:
+            print("Sampling the Image Slicer plane with %d points: %.3f microns / point" % (N_points, (win_slicer / N_points)))
+
+
+        for i_wave, wave_idx in enumerate(wavelength_idx):
+
+            xy_data_slicer = slicer_xy[i_wave]
+            wavelength = system.SystemData.Wavelengths.GetWavelength(wave_idx).Wavelength
+            self.calculate_fwhm(surface='IS', xy_data=xy_data_slicer, PSF_window=win_slicer,
+                                                               N_points=N_points, spaxel_scale=spaxel_scale,
+                                                               wavelength=wavelength)
+
+            # xy_data_detector = detector_xy[i_wave]
+            # fwhm_x_det, fwhm_y_det = self.calculate_fwhm(surface='DET', xy_data=xy_data_detector, PSF_window=win_detect,
+            #                                              N_points=N_points, spaxel_scale=spaxel_scale,
+            #                                              wavelength=wavelength)
+            #
+            # # plt.show()
+            #
+            # foc_xy[i_wave] = [np.mean(xy_data_detector[:, 0]), np.mean(xy_data_detector[:, 1])]
+            #
+            # FWHM[i_wave] = [fwhm_x_det, fwhm_y_slicer]
+            #
+            # if config == 1:
+            #     print("%.3f microns" % wavelength)
+            #     print("FWHM in X [Detector]: %.1f microns | in Y [Image Slicer]: %.2f microns " % (fwhm_x_det, fwhm_y_slicer))
+            #
+        return []
 
     def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
-                        configuration_idx=None, surface=None, field=(1,),
-                        reference='Centroid', mode='RMS', ray_density=6, save_txt=False):
+                        configuration_idx=None, N_rays=500, N_points=50):
+        """
 
-        N_fields = len(field)
-        results_names = ['RMS_SPOT']
-        results_shapes = [(N_fields,)]
+        """
+
+        # We want the result to produce as output: the RMS WFE array, and the RayTrace at both Object and Focal plane
+        results_names = ['FWHM', 'OBJ_XY', 'FOC_XY']
+        # we need to give the shapes of each array to self.run_analysis
+        N_waves = 23 if wavelength_idx is None else len(wavelength_idx)
+        results_shapes = [(N_waves, 2,), (2,), (N_waves, 2,)]
+
+        px, py = define_pupil_sampling(r_obsc=0.2841, N_rays=N_rays, mode='random')
+        print("Using %d rays" % N_rays)
 
         # read the file options
-        file_list, settings = create_zemax_file_list(which_system=files_opt['which_system'], AO_modes=files_opt['AO_modes'],
+        file_list, sett_list = create_zemax_file_list(which_system=files_opt['which_system'], AO_modes=files_opt['AO_modes'],
                                            scales=files_opt['scales'], IFUs=files_opt['IFUs'], grating=files_opt['grating'])
 
-        list_spot = []
-        list_waves = []
-        for zemax_file in file_list:
+        results = []
+        for zemax_file, settings in zip(file_list, sett_list):
 
-            list_results = self.run_analysis(analysis_function=self.analysis_function_rms_spot,
+            # Clear the Cache for the Airy Pattern function
+            airy_and_slicer.cache_clear()
+
+            mas_dict = {'4x4': 4.0, '10x10': 10.0, '20x20': 20.0, '60x30': 60.0}
+            spaxel_scale = mas_dict[settings['scale']]
+
+            list_results = self.run_analysis(analysis_function=self.analysis_function_dynamic,
                                              files_dir=files_dir, zemax_file=zemax_file, results_path=results_path,
                                              results_shapes=results_shapes, results_names=results_names,
                                              wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
-                                             surface=surface, field=field, reference=reference, mode=mode, ray_density=ray_density)
+                                             px=px, py=py, spaxel_scale=spaxel_scale, N_points=N_points)
+            results.append(list_results)
 
-            rms_spot, wavelengths = list_results
-            list_spot.append(rms_spot)
-            list_waves.append(wavelengths)
-
-            # mean_field_spot = np.mean(spots, axis=0)
-            # plt.figure()
-            # plt.imshow(mean_field_spot, origin='lower', cmap='Reds')
-            # plt.colorbar()
-            # plt.ylabel(r'Slice #')
-            # plt.xlabel(r'Wavelength [$\mu$m]')
-            #
-            # mean_spot_wave = np.mean(spots, axis=(0, 1))
-            #
-            # plt.figure()
-            # plt.plot(wavelengths, mean_spot_wave)
-            # plt.xlabel(r'Wavelength [$\mu$m]')
-            # plt.show()
-        self.plot_results(list_spot, list_waves, file_list, results_path, gratings=files_opt['grating'])
-
-        return list_spot
-
-    def plot_results(self, list_spot, list_waves, file_list, results_path, gratings):
-
-
-        # WARNING: this will only work if you have ran the code for a single SCALE and IFU
-        file_no_spec = file_list[0].split('_SPEC')[0]
-
-        file_dir = os.path.join(results_path, file_no_spec)
-        if not os.path.exists(file_dir):
-            os.mkdir(file_dir)
-        spot_dir = os.path.join(file_dir, 'RMS_SPOT_WAVELENGTH')
-        if not os.path.exists(spot_dir):
-            os.mkdir(spot_dir)           # If not, create the directory to store results
-
-        N_gratings = len(gratings)
-        colors = cm.jet(np.linspace(0, 1, N_gratings))
-        plt.figure()
-        for k in range(N_gratings):
-            spots, waves = list_spot[k], list_waves[k]
-            mean_spots = np.mean(spots, axis=(1, 2))
-            plt.plot(waves, mean_spots, color=colors[k], label=gratings[k])
-        plt.xlabel(r'Wavelength [$\mu$m]')
-        plt.ylabel(r'RMS Spot [$\mu$m]')
-        plt.ylim(bottom=0)
-        plt.legend(title=r'Grating', loc=3, ncol=N_gratings//3)
-        figname = file_no_spec + '_RMS_SPOT_WAVELENGTH'
-        plt.title(figname)
-        plt.savefig(os.path.join(spot_dir, figname))
-
-        return
+        return results
 
 
 if __name__ == """__main__""":
 
     pass
-
-
-
