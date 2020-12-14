@@ -2124,16 +2124,16 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
         :param spaxels_per_slice: how many points per slice to use to calculate the RMS WFE (typically 3)
         :param surface: the surface number at which we will calculate the RMS WFE
         :param pupil_sampling: how many points N to use on an N x N grid per pupil quadrant. RWRE operand parameter
+        :param remove_slicer: whether to increase the Aperture of the Image Slicer mirrors to avoid vignetting
         :return:
         """
-        start0 = time()
 
         # Set Current Configuration
         system.MCE.SetCurrentConfiguration(config)
 
         # [WARNING]: for the 4x4 spaxel scale we noticed that a significant fraction of the rays get vignetted at the slicer
         # this introduces a bias in the RMS WFE calculation. To avoid this, we modify the Image Slicer aperture definition
-        # so that all rays get through.
+        # so that all rays get through. Consequently, enough pupil rays are traced to get an unbiased estimation of RMS WFE
         if remove_slicer is True:
 
             # First of all, we need to find the Surface Number for the IMAGE SLICER
@@ -2143,6 +2143,7 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
                 surface_names[k] = system.LDE.GetSurfaceAt(k).Comment
             # find the Slicer surface number
             try:
+                # The naming convention for this surface has changed. Not the same for Nominal Design as Monte Carlos
                 slicer_num = list(surface_names.keys())[list(surface_names.values()).index('Slicer Mirror')]
             except ValueError:
                 slicer_num = list(surface_names.keys())[list(surface_names.values()).index('IFU ISA')]
@@ -2156,20 +2157,22 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
                 # print("Current Settings:")
                 x0 = current_apt_sett._S_RectangularAperture.XHalfWidth
                 y0 = current_apt_sett._S_RectangularAperture.YHalfWidth
+                # If the Y aperture hasn't been changed already, we change it here to 999 mm to get all rays through
                 if y0 != 999:
                     # Change Settings
-                    aperture_settings = slicer.ApertureData.CreateApertureTypeSettings(
-                        constants.SurfaceApertureTypes_RectangularAperture)
+                    aperture_settings = slicer.ApertureData.CreateApertureTypeSettings(constants.SurfaceApertureTypes_RectangularAperture)
                     aperture_settings._S_RectangularAperture.XHalfWidth = x0
                     aperture_settings._S_RectangularAperture.YHalfWidth = 999
                     slicer.ApertureData.ChangeApertureTypeSettings(aperture_settings)
 
                     current_apt_sett = slicer.ApertureData.CurrentTypeSettings
+                    # Notify that we have successfully modified the aperture
                     print("Changing aperture of surface: ", slicer.Comment)
                     print("New Settings:")
                     print("X_HalfWidth = %.2f" % current_apt_sett._S_RectangularAperture.XHalfWidth)
                     print("Y_HalfWidth = %.2f" % current_apt_sett._S_RectangularAperture.YHalfWidth)
 
+        # [1] Some housekeeping and pre-processing operations
         # Get the Field Points for that configuration
         sysField = system.SystemData.Fields
         # Problem with the MC files. Before, all the E2E files had only 3 fields, now there's more, some spurious ones
@@ -2179,6 +2182,7 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
         N_waves = len(wavelength_idx)
         N_rays = N_waves * spaxels_per_slice
 
+        # The only valid Field Points we should care about are 1-3 as defined by Matthias
         fx_min, fy_min = sysField.GetField(1).X, sysField.GetField(1).Y
         fx_max, fy_max = sysField.GetField(3).X, sysField.GetField(3).Y
 
@@ -2190,6 +2194,7 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
         hx_min, hx_max = fx_min / X_MAX, fx_max / X_MAX
         hy_min, hy_max = fy_min / Y_MAX, fy_max / Y_MAX
 
+        # Sample between the edges of the slice as given by "spaxels_per_slice" to include as many points as we want
         hx = np.linspace(hx_min, hx_max, spaxels_per_slice)
         hy = np.linspace(hy_min, hy_max, spaxels_per_slice)
         #
@@ -2208,31 +2213,31 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
         # print(Y_MAX)
         # print(hx, hy)
 
-        # The Field coordinates for the Object
-        obj_xy = np.array([X_MAX * hx, Y_MAX * hy]).T
-        RMS_WFE = np.empty((N_waves, spaxels_per_slice))
-        foc_xy = np.empty((N_waves, spaxels_per_slice, 2))
+        # Some useful data that we'll store
+        obj_xy = np.array([X_MAX * hx, Y_MAX * hy]).T           # The Field coordinates for the Object plane
+        RMS_WFE = np.empty((N_waves, spaxels_per_slice))        # The RMS WFE results
+        foc_xy = np.empty((N_waves, spaxels_per_slice, 2))      # The Chief Ray coordinates at the Detector
 
+        # [2] This is where the core of the RMS WFE calculation takes place
+        # First, we begin by defining the Raytrace
         raytrace = system.Tools.OpenBatchRayTrace()
         normUnPolData = raytrace.CreateNormUnpol(N_rays, constants.RaysType_Real, surface)
 
         # Start creating the Merit Function
         theMFE = system.MFE
 
-        # Clear any operands left
+        # Clear any operands that could be left from the E2E files
         nops = theMFE.NumberOfOperands
         theMFE.RemoveOperandsAt(1, nops)
 
-        # Build merit function
+        # Build the Merit Function
         # Set first operand to current configuration
         op = theMFE.GetOperandAt(1)
         op.ChangeType(constants.MeritOperandType_CONF)
         op.GetOperandCell(constants.MeritColumn_Param1).Value = config
+        wfe_op = constants.MeritOperandType_RWRE            # The Type of RMS WFE Operand: RWRE rectangular
 
-        # Pupil Sampling
-        samp = pupil_sampling
-        wfe_op = constants.MeritOperandType_RWRE
-
+        # Populate the Merit Function with RMS WFE Operands
         # Loop over the wavelengths
         for i_wave, wave_idx in enumerate(wavelength_idx):
 
@@ -2241,7 +2246,7 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
 
                 op = theMFE.AddOperand()
                 op.ChangeType(wfe_op)
-                op.GetOperandCell(constants.MeritColumn_Param1).Value = int(samp)
+                op.GetOperandCell(constants.MeritColumn_Param1).Value = int(pupil_sampling)
                 op.GetOperandCell(constants.MeritColumn_Param2).Value = int(wave_idx)
 
                 # if config == 1:
@@ -2252,14 +2257,14 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
                 op.GetOperandCell(constants.MeritColumn_Param4).Value = float(h_y)
                 op.GetOperandCell(constants.MeritColumn_Weight).Value = 0
 
-                # Add the ray to the RayTrace
+                # Take advantage of the loop to simultaneously add the ray to the RayTrace
                 normUnPolData.AddRay(wave_idx, h_x, h_y, 0, 0, constants.OPDMode_None)
 
         # time_1 = time() - start0
         # print("\nTime spent setting up MF and Raytrace: %.3f sec" % time_1)
         # start = time()
 
-        # update merit function
+        # update the Merit Function
         theMFE.CalculateMeritFunction()
         # time_mf = time() - start
         # print("Time spent updating MF: %.3f sec" % time_mf)
@@ -2271,14 +2276,14 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
         # print("Time spent running Raytrace: %.3f sec" % time_ray)
 
         # start = time()
+        # [3] Time to start reading the results of the RMS WFE Operands + Raytrace coordinates
         normUnPolData.StartReadingResults()
-
-        # Retrieve the results for the operands and raytrace
         # Loop over the wavelengths
         for i_wave, wave_idx in enumerate(wavelength_idx):
             # Loop over all Spaxels in the Slice
             for j_field, (h_x, h_y) in enumerate(zip(hx, hy)):
 
+                # Calculate the Row index we need to get the Operand
                 irow = 2 + i_wave * spaxels_per_slice + j_field
                 # print(irow)
 
@@ -2298,9 +2303,9 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
                 wavelength = system.SystemData.Wavelengths.GetWavelength(wave_idx).Wavelength
 
                 RMS_WFE[i_wave, j_field] = wavelength * 1e3 * rms  # We assume the Wavelength comes in Microns
-                # print("Row #%d: Wave %.3f micron | Field #%d -> RMS %.3f" % (irow, wavelength, j_field + 1, rms))
 
-                # If for one the AO modes we get an RMS value of 0.0, print the data so we can double check the Zemax file
+                # If we get an RMS value of 0.0, print the data so we can double check the Zemax file
+                # This is bad news and it mean the Rays are being vignetted somewhere
                 if RMS_WFE[i_wave, j_field] == 0.0:
                     print("\nConfig #%d | Wave #%d | Field #%d" % (config, wave_idx, j_field + 1))
                     # raise ValueError
@@ -2311,12 +2316,11 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
                     foc_xy[i_wave, j_field, 0] = x
                     foc_xy[i_wave, j_field, 1] = y
 
-                    vignet_code = output[3]
-                    if vignet_code != 0:
-
-                        vignetting_surface = system.LDE.GetSurfaceAt(vignet_code).Comment
-                        # print("\nConfig #%d" % (config))
-                        # print("Vignetting at surface #%d: %s" % (vignet_code, vignetting_surface))
+                    vignetting_code = output[3]
+                    if vignetting_code != 0:
+                        vignetting_surface = system.LDE.GetSurfaceAt(vignetting_code).Comment
+                        print("\nConfig #%d" % (config))
+                        print("Vignetting at surface #%d: %s" % (vignetting_surface, vignetting_surface))
             # if config == 1:
             #     raise ValueError
 
@@ -2329,9 +2333,6 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
         # print("TOTAL Time: %.3f sec" % time_total)
         # sec_per_wave = time_total / N_waves * 1000
         # print("%3.f millisec per Wavelength" % sec_per_wave)
-        #
-        #
-        # plt.scatter(foc_xy[:, :, 0].flatten(), foc_xy[:, :, 1].flatten(), s=2, color='black')
 
         return [RMS_WFE, obj_xy, foc_xy]
 
