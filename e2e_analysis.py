@@ -2320,7 +2320,7 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
                     if vignetting_code != 0:
                         vignetting_surface = system.LDE.GetSurfaceAt(vignetting_code).Comment
                         print("\nConfig #%d" % (config))
-                        print("Vignetting at surface #%d: %s" % (vignetting_surface, vignetting_surface))
+                        print("Vignetting at surface #%d: %s" % (vignetting_code, vignetting_surface))
             # if config == 1:
             #     raise ValueError
 
