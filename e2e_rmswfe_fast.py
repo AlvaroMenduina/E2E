@@ -437,7 +437,7 @@ if __name__ == """__main__""":
     sys_mode = 'HARMONI'
     ao_modes = ['NOAO']
     ao_mode = 'NOAO'
-    spaxel_scale = '4x4'
+    spaxel_scale = '20x20'
     spaxels_per_slice = 3       # How many field points per Slice to use
     pupil_sampling = 4          # N x N grid per pupil quadrant. See Zemax Operand help for RWRE
     # gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_SHORT', 'K_LONG']
@@ -534,3 +534,18 @@ if __name__ == """__main__""":
     fig_box.savefig(os.path.join(analysis_dir, fig_name))
 
     plt.show()
+
+
+    def my_function(self, x):
+        s = x**2
+        return s
+
+    class MyObject(object):
+
+        def __init__(self, funct=my_function):
+
+            MyObject.funct = funct
+
+
+    obj = MyObject()
+    print(obj.funct)

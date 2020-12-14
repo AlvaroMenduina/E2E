@@ -35,7 +35,6 @@ import git
 repo = git.Repo(search_parent_directories=True)
 sha = repo.head.object.hexsha
 
-
 # Taken from Zemax example code
 class PythonStandaloneApplication(object):
 
@@ -555,14 +554,17 @@ def define_pupil_sampling(r_obsc, N_rays, mode='random'):
 def create_zemax_filename_MC(AO_mode, FPRS_MC_instance, scale, IPO_MC_instance, IFUpath, IFU_MC_instance,
                              grating, ISP_MC_instance):
     """
-
-    Newest version that accommodates the new naming convetion for the Monte Carlos
+    Newest version that accommodates the new naming convention for the Monte Carlos
     which includes the instance number of each subsystem
 
     We also get rid of the "system" option that allowed us to choose between ELT, HARMONI and IFS
     since all the analyses are done for the HARMONI mode only.
 
+    The Zemax E2E files follow the filename structure of:
+        FPRS_'AO_mode'_MC_T#### + CRYO_PO'SpaxelScale'_MC_T#### + IFU-'IFUpath'_MC_T#### + SPEC-'Grating'_MC_T####.zmx
 
+    Bear in mind that at the moment a list of a single item with the filename is returned,
+    this is something undesirable that we inherited from the loop_over_files functionality
     """
 
     fprs = "FPRS_%s_MC_T%s" % (AO_mode, FPRS_MC_instance)
@@ -927,7 +929,6 @@ class AnalysisGeneric(object):
         # - Running some Ray Trace:                     raytrace = system.Tools.OpenBatchRayTrace()
         #                                               normUnPolData = raytrace.CreateNormUnpol(N_rays,
         #                                                                        constants.RaysType_Real, toSurface)
-
 
         # You should return a list of arrays
 
@@ -1314,284 +1315,11 @@ class AnalysisFast(object):
 #   - Raytrace
 #   - RMS WFE
 
-class RaytraceAnalysis(AnalysisGeneric):
-    """
-    Raytrace analysis at any surface (this is the SLOW old version)
-    """
-
-    @staticmethod
-    def analysis_function_raytrace(system, wave_idx, config, rays_per_slice, surface):
-
-        # Set Current Configuration
-        system.MCE.SetCurrentConfiguration(config)
-
-        # Get the Field Points for that configuration
-        sysField = system.SystemData.Fields
-        # check that the field is normalized correctly
-        if sysField.Normalization != constants.FieldNormalizationType_Radial:
-            sysField.Normalization = constants.FieldNormalizationType_Radial
-        N_fields = sysField.NumberOfFields
-
-        # Loop over the fields to get the Normalization Radius
-        r_max = np.max([np.sqrt(sysField.GetField(i).X ** 2 +
-                                sysField.GetField(i).Y ** 2) for i in np.arange(1, N_fields + 1)])
-
-        # Watch Out! This assumes that Field #1 is at the edge of the slice and that Field #3 is at the other edge
-        fx_min, fy_min = sysField.GetField(1).X, sysField.GetField(1).Y
-        fx_max, fy_max = sysField.GetField(3).X, sysField.GetField(3).Y
-
-        # Normalized field coordinates (hx, hy)
-        hx_min, hx_max = fx_min / r_max, fx_max / r_max
-        hy_min, hy_max = fy_min / r_max, fy_max / r_max
-
-        hx = np.linspace(hx_min, hx_max, rays_per_slice)
-        hy = np.linspace(hy_min, hy_max, rays_per_slice)
-
-        # The Field coordinates for the Object
-        obj_xy = r_max * np.array([hx, hy]).T
-        foc_xy = np.empty((rays_per_slice, 2))
-        global_xy = np.empty((rays_per_slice, 2))
-        local_xyz = np.empty((rays_per_slice, 3))
-
-        raytrace = system.Tools.OpenBatchRayTrace()
-        normUnPolData = raytrace.CreateNormUnpol(rays_per_slice, constants.RaysType_Real, surface)
-
-        # Loop over all Rays in the Slice
-        for i, (h_x, h_y) in enumerate(zip(hx, hy)):
-            # Add the ray to the RayTrace
-            normUnPolData.AddRay(wave_idx, h_x, h_y, 0, 0, constants.OPDMode_None)
-
-        # Run the RayTrace for the whole Slice
-        CastTo(raytrace, 'ISystemTool').RunAndWaitForCompletion()
-        normUnPolData.StartReadingResults()
-        for i in range(rays_per_slice):
-            output = normUnPolData.ReadNextResult()
-            if output[2] == 0 and output[3] == 0:
-                local_xyz[i, 0] = output[4]
-                local_xyz[i, 1] = output[5]
-                local_xyz[i, 2] = output[6]
-
-                # Local Focal X Y
-                foc_xy[i, 0] = output[4]
-                foc_xy[i, 1] = output[5]
-
-        normUnPolData.ClearData()
-        CastTo(raytrace, 'ISystemTool').Close()
-
-        # Get the transformation from Local to Global Coordinates
-        global_mat = system.LDE.GetGlobalMatrix(surface)
-        R11, R12, R13, R21, R22, R23, R31, R32, R33, X0, Y0, Z0 = global_mat[1:]
-        global_matrix = np.array([[R11, R12, R13],
-                                  [R21, R22, R23],
-                                  [R31, R32, R33]])
-        offset = np.array([X0, Y0, Z0])
-
-        # Transform from Local to Global and only save X and Y
-        global_xyz = (np.dot(global_matrix, local_xyz.T)).T + offset
-        global_xy = global_xyz[:, :2]
-
-        return [obj_xy, foc_xy, global_xy]
-
-    def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
-                        configuration_idx=None, surface=None, rays_per_slice=3):
-        """
-        Function that loops over a given set of E2E model Zemax files, running the analysis
-        defined by self.analysis_function_raytrace
-
-
-        :param files_dir: path where the E2E model files are stored
-        :param files_opt: dictionary containing the info to create the list of zemax files we want to analyse
-        :param results_path: path where we want to store the results
-        :param wavelength_idx: list containing the Wavelength numbers we want to analyze. If None, we will use All
-        :param configuration_idx: list containing the Configurations we want to analyze. If None, we will use All
-        :param surface: Zemax Surface number at which the analysis will be computed
-        :param rays_per_slice: number rays to trace per slice
-        :return:
-        """
-
-        results_names = ['OBJ_XY', 'FOC_XY', 'GLOB_XY']
-        # we need to give the shapes of each array to self.run_analysis
-        results_shapes = [(rays_per_slice, 2), (rays_per_slice, 2), (rays_per_slice, 2)]
-
-        # read the file options
-        file_list, sett_list = create_zemax_file_list(which_system=files_opt['which_system'],
-                                                      AO_modes=files_opt['AO_modes'], scales=files_opt['scales'],
-                                                      IFUs=files_opt['IFUs'], grating=files_opt['grating'])
-
-        # Loop over the Zemax files
-        results = []
-        for zemax_file, settings in zip(file_list, sett_list):
-
-            list_results = self.run_analysis(analysis_function=self.analysis_function_raytrace,
-                                             files_dir=files_dir, zemax_file=zemax_file, results_path=results_path,
-                                             results_shapes=results_shapes, results_names=results_names,
-                                             wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
-                                             surface=surface, rays_per_slice=rays_per_slice)
-
-            # For each file we save the list of results
-            # we could use that in a Monte Carlo analysis for example
-            results.append(list_results)
-
-        return results
-
-
-class Raytrace_FastAnalysis(AnalysisFast):
-    """
-    Raytrace Analysis [Fast]
-    Traces a set of Chief Rays to a given surface (typically the Detector plane)
-    """
-
-    @staticmethod
-    def analysis_function_raytrace(system, wavelength_idx, config, spaxels_per_slice, surface, ignore_vignetting):
-        """
-        For a given configuration, trace chief rays for chosen wavelengths and field points (spaxels_per_slice)
-        using a single Raytrace
-
-        :param system: Zemax optical system
-        :param wavelength_idx: list of Zemax wavelength indices we want
-        :param config: current Zemax configuration number
-        :param spaxels_per_slice: how many field points per slice we want to trace
-        :param surface: Zemax surface number we want to trace the rays to
-        :param ignore_vignetting: boolean, whether or not to ignore vignetting
-        :return:
-        """
-        start0 = time()
-
-        # Set Current Configuration
-        system.MCE.SetCurrentConfiguration(config)
-
-        # Get the Field Points for that configuration
-        sysField = system.SystemData.Fields
-        N_fields = sysField.NumberOfFields
-        N_waves = len(wavelength_idx)
-        N_rays = N_waves * spaxels_per_slice
-
-        fx_min, fy_min = sysField.GetField(1).X, sysField.GetField(1).Y
-        fx_max, fy_max = sysField.GetField(N_fields).X, sysField.GetField(N_fields).Y
-
-        X_MAX = np.max([np.abs(sysField.GetField(i + 1).X) for i in range(N_fields)])
-        Y_MAX = np.max([np.abs(sysField.GetField(i + 1).Y) for i in range(N_fields)])
-
-        # Normalized field coordinates (hx, hy)
-        hx_min, hx_max = fx_min / X_MAX, fx_max / X_MAX
-        hy_min, hy_max = fy_min / Y_MAX, fy_max / Y_MAX
-
-        hx = np.linspace(hx_min, hx_max, spaxels_per_slice)
-        hy = np.linspace(hy_min, hy_max, spaxels_per_slice)
-        # hx = np.array([sysField.GetField(i + 1).X / X_MAX for i in range(N_fields)])
-        # hy = np.array([sysField.GetField(i + 1).Y / Y_MAX for i in range(N_fields)])
-
-        # The Field coordinates for the Object
-        obj_xy = np.array([X_MAX * hx, Y_MAX * hy]).T
-        foc_xy = np.empty((N_waves, spaxels_per_slice, 2))
-
-        raytrace = system.Tools.OpenBatchRayTrace()
-        normUnPolData = raytrace.CreateNormUnpol(N_rays, constants.RaysType_Real, surface)
-
-        # Loop over the wavelengths
-        for i_wave, wave_idx in enumerate(wavelength_idx):
-
-            # Loop over all Spaxels in the Slice
-            for j_field, (h_x, h_y) in enumerate(zip(hx, hy)):
-
-                # Add the ray to the RayTrace
-                normUnPolData.AddRay(wave_idx, h_x, h_y, 0, 0, constants.OPDMode_None)
-
-        # Run the RayTrace for the whole Slice
-        CastTo(raytrace, 'ISystemTool').RunAndWaitForCompletion()
-        # time_ray = time() - start
-        # print("Time spent running Raytrace: %.3f sec" % time_ray)
-
-        # start = time()
-        normUnPolData.StartReadingResults()
-
-        # Retrieve the results for the operands and raytrace
-        # Loop over the wavelengths
-        for i_wave, wave_idx in enumerate(wavelength_idx):
-            # Loop over all Spaxels in the Slice
-            for j_field, (h_x, h_y) in enumerate(zip(hx, hy)):
-
-                output = normUnPolData.ReadNextResult()
-                if ignore_vignetting == False:
-                    # We do care about vignetting
-                    if output[2] == 0 and output[3] == 0:
-                        x, y = output[4], output[5]
-                        foc_xy[i_wave, j_field, 0] = x
-                        foc_xy[i_wave, j_field, 1] = y
-
-                    elif output[2] == 0 and output[3] != 0:
-                        vignet_code = output[3]
-                        vignetting_surface = system.LDE.GetSurfaceAt(vignet_code).Comment
-                        print("\nConfig #%d | Wavelength idx #%d" % (config, wave_idx))
-                        fx, fy = h_x * X_MAX, h_y * Y_MAX
-                        print("Field point #%d : hx=%.4f hy=%.4f | fx=%.4f, fy=%.4f" % (j_field + 1, h_x, h_y, fx, fy))
-                        print("Vignetting at surface #%d: %s" % (vignet_code, vignetting_surface))
-                else:
-                    # If we don't care about vignetting (rays falling outside the active area of the detector, for example)
-                    # we add the Raytrace results to the focal coordinates array no matter what
-                    if output[2] == 0:
-                        x, y = output[4], output[5]
-                        foc_xy[i_wave, j_field, 0] = x
-                        foc_xy[i_wave, j_field, 1] = y
-
-        normUnPolData.ClearData()
-        CastTo(raytrace, 'ISystemTool').Close()
-        # time_res = time() - start
-        # print("Time spent reading results: %.3f sec" % time_res)
-
-        return [obj_xy, foc_xy]
-
-    def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
-                        configuration_idx=None, surface=None, spaxels_per_slice=3, ignore_vignetting=False,
-                        save_hdf5=False):
-        """
-        We loop over the Zemax files, calculating the Raytrace
-
-        The results will be (1) an OBJECT XY coordinates array of size [N_configs, spaxels_per_slice, 2], and
-        (2) a FOCAL XY coordinates array of size [N_configs, N_waves, spaxels_per_slice, 2], notice the wavelengths!
-
-        """
-
-        results_names = ['OBJ_XY', 'FOC_XY']
-        N_waves = 23 if wavelength_idx is None else len(wavelength_idx)
-        # we need to give the shapes of each array to self.run_analysis
-        results_shapes = [(spaxels_per_slice, 2), (N_waves, spaxels_per_slice, 2)]
-
-        metadata = {}
-        metadata['Spaxels per slice'] = spaxels_per_slice
-        metadata['Configurations'] = 'All' if configuration_idx is None else configuration_idx
-        metadata['Wavelengths'] = 'All' if wavelength_idx is None else wavelength_idx
-
-        # read the file options
-        file_list, sett_list = create_zemax_file_list(which_system=files_opt['which_system'],
-                                                      AO_modes=files_opt['AO_modes'], scales=files_opt['scales'],
-                                                      IFUs=files_opt['IFUs'], grating=files_opt['grating'])
-
-        # Loop over the Zemax files
-        results = []
-        for zemax_file, settings in zip(file_list, sett_list):
-
-            list_results = self.run_analysis(analysis_function=self.analysis_function_raytrace,
-                                             files_dir=files_dir, zemax_file=zemax_file, results_path=results_path,
-                                             results_shapes=results_shapes, results_names=results_names,
-                                             wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
-                                             ignore_vignetting=ignore_vignetting,
-                                             surface=surface, spaxels_per_slice=spaxels_per_slice)
-
-            results.append(list_results)
-
-            if save_hdf5 == True:
-                # We save the arrays in HDF5 format alongside the analysis metadata in case we want to look at it later
-                file_name = zemax_file.split('.')[0]
-                settings['surface'] = 'DETECTOR' if surface is None else surface
-                self.save_hdf5(analysis_name='RAYTRACE', analysis_metadata=metadata, list_results=list_results,
-                               results_names=results_names, file_name=file_name, file_settings=settings, results_dir=results_path)
-
-        return results
-
-
 class RMS_WFE_Analysis(AnalysisGeneric):
     """
+    [NOTE] AnalysisGeneric is almost deprecated in favour of the faster version AnalysisFast
+    Think of this as an 'example' for inspiration to learn how to work with the E2E models
+
     Example of how to use Class Inheritance with the AnalysisGeneric object
     to calculate the RMS WFE error
 
@@ -1624,20 +1352,10 @@ class RMS_WFE_Analysis(AnalysisGeneric):
 
         # Get the Field Points for that configuration
         sysField = system.SystemData.Fields
-        # check that the field is normalized correctly
-        # if sysField.Normalization != constants.FieldNormalizationType_Radial:
-        #     sysField.Normalization = constants.FieldNormalizationType_Radial
 
         N_fields = sysField.NumberOfFields
         wavelength = system.SystemData.Wavelengths.GetWavelength(wave_idx).Wavelength
 
-        # # Loop over the fields to get the Normalization Radius (if Radial)
-        # r_max = np.max([np.sqrt(sysField.GetField(i).X ** 2 +
-        #                         sysField.GetField(i).Y ** 2) for i in np.arange(1, N_fields + 1)])
-        # print(r_max)
-
-        # TODO: make this robust
-        # Watch Out! This assumes that Field #1 is at the edge of the slice and that Field #3 is at the other edge
         fx_min, fy_min = sysField.GetField(1).X, sysField.GetField(1).Y
         fx_max, fy_max = sysField.GetField(3).X, sysField.GetField(3).Y
 
@@ -1819,285 +1537,6 @@ class RMS_WFE_Analysis(AnalysisGeneric):
         return results
 
 
-class WavefrontsAnalysis(AnalysisFast):
-
-    def analysis_function_wavefronts(self, system, wavelength_idx, config, surface, sampling, coef_path, remove_slicer=False):
-
-        # Set Current Configuration
-        system.MCE.SetCurrentConfiguration(config)
-
-        # [WARNING]: for the 4x4 spaxel scale we noticed that a significant fraction of the rays get vignetted at the slicer
-        # this introduces a bias in the RMS WFE calculation. To avoid this, we modify the Image Slicer aperture definition
-        # so that all rays get through.
-        if remove_slicer is True:
-
-            # First of all, we need to find the Surface Number for the IMAGE SLICER
-            N_surfaces = system.LDE.NumberOfSurfaces
-            surface_names = {}      # A dictionary of surface number -> surface comment
-            for k in np.arange(1, N_surfaces):
-                surface_names[k] = system.LDE.GetSurfaceAt(k).Comment
-            # find the Slicer surface number
-            slicer_num = list(surface_names.keys())[list(surface_names.values()).index('IFU ISA')]
-            slicer = system.LDE.GetSurfaceAt(slicer_num)
-
-            # Read Current Aperture Settings
-            apt_type = slicer.ApertureData.CurrentType
-            # print("Aperture type: ", apt_type)
-            if apt_type == 4:  # 4 is Rectangular aperture
-                current_apt_sett = slicer.ApertureData.CurrentTypeSettings
-                # print("Current Settings:")
-                x0 = current_apt_sett._S_RectangularAperture.XHalfWidth
-                y0 = current_apt_sett._S_RectangularAperture.YHalfWidth
-                if y0 != 999:
-                    # Change Settings
-                    aperture_settings = slicer.ApertureData.CreateApertureTypeSettings(
-                        constants.SurfaceApertureTypes_RectangularAperture)
-                    aperture_settings._S_RectangularAperture.XHalfWidth = x0
-                    aperture_settings._S_RectangularAperture.YHalfWidth = 999
-                    slicer.ApertureData.ChangeApertureTypeSettings(aperture_settings)
-
-                    current_apt_sett = slicer.ApertureData.CurrentTypeSettings
-                    print("Changing aperture of surface: ", slicer.Comment)
-                    print("New Settings:")
-                    print("X_HalfWidth = %.2f" % current_apt_sett._S_RectangularAperture.XHalfWidth)
-                    print("Y_HalfWidth = %.2f" % current_apt_sett._S_RectangularAperture.YHalfWidth)
-
-        # Add a Zernike surface at the Entrance Pupil
-        # First we check whether we have already added
-        # surface_name2 = system.LDE.GetSurfaceAt(2).Comment
-        # if surface_name2 != "Zernike Correction":
-        #     print("Inserting new surface at #2")
-        #     # we have to add the surface
-        #     system.LDE.InsertNewSurfaceAt(2)
-        #     zernike_surface = system.LDE.GetSurfaceAt(2)
-        #     zernike_surface.Comment = "Zernike Correction"
-        #
-        #     types = zernike_surface.AvailableSurfaceTypes()
-        #     print(types)
-        #
-        #     print("Surface Type: ", system.LDE.GetSurfaceAt(2).TypeName)
-        #     SurfaceType = zernike_surface.GetSurfaceTypeSettings(ZOSAPI.Editors.LDE.SurfaceType.CoordinateBreak)
-        #     # SurfaceType = zernike_surface.GetSurfaceTypeSettings()
-        #     #
-        #     zernike_surface.ChangeType(constants.SurfaceType_ZernikeStandardPhase)
-        #
-        #     # Get aperture data
-        #     system_data = system.SystemData
-        #     system_aperture_value = system_data.Aperture.ApertureValue
-        #     system_aperture_type = system_data.Aperture.ApertureType
-        #
-        #     entrance_pupil_diam = system_aperture_value
-        #
-        # else:
-        #     print("Surface #2 is already: ", surface_name2)
-        #
-        # N_s = system.LDE.NumberOfSurfaces
-        # print(N_s)
-        # print("_______")
-
-        # Get the Field Points for that configuration
-        sysField = system.SystemData.Fields
-        N_fields = sysField.NumberOfFields
-        sysWave = system.SystemData.Wavelengths
-        N_waves = len(wavelength_idx)
-        N_rays = N_waves * 1
-
-        # Get the Field Point at the centre of the Slice
-        fx, fy = sysField.GetField(2).X, sysField.GetField(2).Y
-
-        # Note that this assumes Rectangular Normalization, the default in the E2E files.
-        X_MAX = np.max([np.abs(sysField.GetField(i + 1).X) for i in range(N_fields)])
-        Y_MAX = np.max([np.abs(sysField.GetField(i + 1).Y) for i in range(N_fields)])
-
-        # Normalized field coordinates (hx, hy)
-        hx, hy = fx / X_MAX, fy / Y_MAX
-
-        # The Field coordinates for the Object
-        obj_xy = np.array([fx, fy])
-        # RMS_WFE = np.empty((N_waves, spaxels_per_slice))
-        foc_xy = np.empty((N_waves, 2))
-
-        N_surfaces = system.LDE.NumberOfSurfaces
-
-        # check pupil sampling
-        samps = {'32x32': constants.SampleSizes_S_32x32,
-                 '64x64': constants.SampleSizes_S_64x64,
-                 '128x128': constants.SampleSizes_S_128x128,
-                 '256x256': constants.SampleSizes_S_256x256,
-                 '512x512': constants.SampleSizes_S_512x512,
-                 '1024x1024': constants.SampleSizes_S_1024x1024,
-                 '2048x2048': constants.SampleSizes_S_2048x2048,
-                 '4096x4096': constants.SampleSizes_S_4096x4096,
-                 '8192x8192': constants.SampleSizes_S_8192x8192,
-                 '16384x16384': constants.SampleSizes_S_16384x16384}
-        if sampling not in samps:
-            ValueError('sampling must be one of the following: ' +
-                       ', '.join(samps.keys()))
-
-        # # Get the Zernike Standard Coefficients for the Wavefront at the Detector
-        # # # set next wavelength
-        # wavelength = system.SystemData.Wavelengths.GetWavelength(wavelength_idx[0]).Wavelength
-        #
-        # analysis_coeffs = system.Analyses.New_Analysis(constants.AnalysisIDM_ZernikeStandardCoefficients)
-        # settings = analysis_coeffs.GetSettings()
-        # csettings = CastTo(settings, 'IAS_ZernikeStandardCoefficients')
-        # csettings.Surface.SetSurfaceNumber(N_surfaces)
-        # csettings.Wavelength.SetWavelengthNumber(wavelength)
-        # # csettings.Sampling = samps[sampling]
-        # csettings.Field.SetFieldNumber(2)
-        # analysis_coeffs.ApplyAndWaitForCompletion()
-        #
-        # results = analysis_coeffs.GetResults()
-        # cresults = CastTo(results, 'IAR_')
-        #
-        # # save results as a stupid text file because Zemax won't give you an array
-        # file_name = os.path.join(coef_path, 'result_config%d.txt' % config)
-        # cresults.GetTextFile(file_name)
-        #
-        # N_zern = 15
-        # std_coef = self.read_zernike_coefficients(file_name, N_zern=N_zern)
-        # print("Zernike Coefficients: ")
-        # print(std_coef)
-        # analysis_coeffs.Close()
-        #
-        # # Now we apply those Zernike coefficients as correction at the entrance pupil
-        #
-        # zernike_phase = system.LDE.GetSurfaceAt(2)
-        # print(zernike_phase.Comment)
-        # # Setting the N_terms to 0 removes all coefficients (sanity check)
-        # zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par13).IntegerValue = 0
-        # zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par13).IntegerValue = 5
-        # # Start with the terms again
-        #
-        # # Norm Radius
-        # system_aperture_diam = system.SystemData.Aperture.ApertureValue
-        # zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par14).DoubleValue = system_aperture_diam / 2
-        #
-        # list_params = [constants.SurfaceColumn_Par15, constants.SurfaceColumn_Par16, constants.SurfaceColumn_Par17,
-        #                constants.SurfaceColumn_Par18, constants.SurfaceColumn_Par19, constants.SurfaceColumn_Par20,
-        #                constants.SurfaceColumn_Par21, constants.SurfaceColumn_Par22, constants.SurfaceColumn_Par23,
-        #                constants.SurfaceColumn_Par24, constants.SurfaceColumn_Par25, constants.SurfaceColumn_Par26,
-        #                constants.SurfaceColumn_Par27, constants.SurfaceColumn_Par28, constants.SurfaceColumn_Par29]
-        #
-        # zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par15).DoubleValue = -std_coef[0]
-        # zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par16).DoubleValue = -std_coef[1]
-        # zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par17).DoubleValue = -std_coef[2]
-        # zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par18).DoubleValue = -std_coef[3]
-        # zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par19).DoubleValue = -std_coef[4]
-        # # zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par20).DoubleValue = -std_coef[5]
-        #
-        #
-        # # for k, param in enumerate(list_params[:N_zern]):
-        # #     a0 = zernike_phase.GetSurfaceCell(param).DoubleValue
-        # #     print(a0)
-        # #     zernike_phase.GetSurfaceCell(param).DoubleValue = -std_coef[k]
-        # a0 = zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par15).DoubleValue
-        # print(a0)
-
-        # iterate through wavelengths
-        for j, wave_idx in enumerate(wavelength_idx):
-
-            # set next wavelength
-            wavelength = system.SystemData.Wavelengths.GetWavelength(wave_idx).Wavelength
-
-            # open analysis
-            awfe = system.Analyses.New_Analysis(constants.AnalysisIDM_WavefrontMap)
-            settings = awfe.GetSettings()
-            csettings = CastTo(settings, 'IAS_WavefrontMap')
-
-            # setup analysis
-            csettings.Surface.SetSurfaceNumber(N_surfaces)
-            csettings.Wavelength.SetWavelengthNumber(wave_idx)  # always changing wave 1
-            csettings.Rotation = constants.Rotations_Rotate_0
-            csettings.Sampling = samps[sampling]
-            csettings.Polarization = constants.Polarizations_None
-            csettings.ReferenceToPrimary = False  # True --> lateral color
-            csettings.UseExitPupil = False
-            csettings.RemoveTilt = True  # True --> ref. to centroid
-            csettings.Subaperture_X = 0.
-            csettings.Subaperture_Y = 0.
-            csettings.Subaperture_R = 1.
-
-            # change field position
-            csettings.Field.SetFieldNumber(2)
-
-            # run analysis
-            awfe.ApplyAndWaitForCompletion()
-
-            # get results
-            results = awfe.GetResults()
-            cresults = CastTo(results, 'IAR_')
-            data = np.array(cresults.GetDataGrid(0).Values)
-            ptv_zos = float(cresults.HeaderData.Lines[2].split('=')[1].split(' ')[1])
-            rms_zos = float(cresults.HeaderData.Lines[2].split('=')[-1].split(' ')[1])
-            mdata = data - np.nanmean(data)
-            rms_wfe = np.sqrt(np.nanmean(mdata * mdata))
-            rms_wfe_nm = rms_wfe * wavelength * 1e3
-            # print(ptv_zos, rms_zos)
-
-            # plt.figure()
-            # plt.imshow(data, cmap='jet', origin='lower')
-            # plt.title(r'Wave: %.3f $\mu$m, Slice #%d | RMS: %.3f $\lambda$ (%.1f nm)' % (wavelength, config, rms_wfe, rms_wfe_nm))
-            # plt.colorbar()
-            # plt.show()
-
-        # close analysis
-        awfe.Close()
-        # data = np.zeros((1, 128, 128))
-
-        return [data, foc_xy]
-
-    @staticmethod
-    def read_zernike_coefficients(file_name, N_zern):
-        f = open(file_name, encoding="utf-16")
-        skiprows = 38
-        lines = f.readlines()[skiprows:]
-        coef = np.zeros(N_zern)
-        for k in range(N_zern):
-            # read the float coefficient in the text line
-            str_coef = re.findall("[+-]?\d+\.\d+", lines[k])[0]
-            # print(str_coef)
-            coef[k] = float(str_coef)
-        return coef
-
-    def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
-                        configuration_idx=None, surface=None, sampling=1024,
-                        save_hdf5=True, coef_path=None, remove_slicer_aperture=True):
-
-
-        # XXX
-        results_names = ['WAVEFRONT', 'FOC_XY']
-
-        N_waves = 23 if wavelength_idx is None else len(wavelength_idx)
-        # we need to give the shapes of each array to self.run_analysis
-        results_shapes = [(N_waves, sampling, sampling,), (N_waves, 2)]
-        sampling_str = '%sx%s' % (sampling, sampling)
-
-        metadata = {}
-        metadata['Sampling'] = sampling
-        metadata['Configurations'] = 'All' if configuration_idx is None else configuration_idx
-        metadata['Wavelengths'] = 'All' if wavelength_idx is None else wavelength_idx
-
-
-        # read the file options
-        file_list, sett_list = create_zemax_file_list(which_system=files_opt['which_system'],
-                                                      AO_modes=files_opt['AO_modes'], scales=files_opt['scales'],
-                                                      IFUs=files_opt['IFUs'], grating=files_opt['grating'])
-
-        # Loop over the Zemax files
-        results = []
-        for zemax_file, settings in zip(file_list, sett_list):
-
-            list_results = self.run_analysis(analysis_function=self.analysis_function_wavefronts,
-                                             files_dir=files_dir, zemax_file=zemax_file, results_path=results_path,
-                                             results_shapes=results_shapes, results_names=results_names,
-                                             wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
-                                             surface=surface, sampling=sampling_str,
-                                             coef_path=coef_path, remove_slicer=remove_slicer_aperture)
-
-            results.append(list_results)
-
-        return results
 
 
 class RMS_WFE_FastAnalysis(AnalysisFast):
@@ -2366,7 +1805,7 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
         metadata['Configurations'] = 'All' if configuration_idx is None else configuration_idx
         metadata['Wavelengths'] = 'All' if wavelength_idx is None else wavelength_idx
 
-        # read the file options
+        # read the file options. We have to make a distinction between the Nominal Design and the Monte Carlo files
         if monte_carlo is False:
             file_list, sett_list = create_zemax_file_list(which_system=files_opt['which_system'],
                                                           AO_modes=files_opt['AO_modes'], scales=[files_opt['SPAX_SCALE']],
@@ -2379,7 +1818,7 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
                                                           IFU_MC_instance=files_opt['IFU_MC'],
                                                           ISP_MC_instance=files_opt['ISP_MC'])
 
-        # Loop over the Zemax files
+        # Loop over the Zemax files | We tend to run the analysis for single files so this is kind of pointless
         results = []
         for zemax_file, settings in zip(file_list, sett_list):
 
@@ -3088,6 +2527,442 @@ class CommonWavelengthRange(AnalysisFast):
             self.save_hdf5(analysis_name='COMMON_WAVELENGTH_RANGE', analysis_metadata=metadata,
                            list_results=list_results, results_names=results_names,
                            file_name=file_name, file_settings=settings, results_dir=results_path)
+
+        return results
+
+
+class Raytrace_FastAnalysis(AnalysisFast):
+    """
+    Raytrace Analysis [Fast]
+    Traces a set of Chief Rays to a given surface (typically the Detector plane)
+    """
+
+    @staticmethod
+    def analysis_function_raytrace(system, wavelength_idx, config, spaxels_per_slice, surface, ignore_vignetting):
+        """
+        For a given configuration, trace chief rays for chosen wavelengths and field points (spaxels_per_slice)
+        using a single Raytrace
+
+        :param system: Zemax optical system
+        :param wavelength_idx: list of Zemax wavelength indices we want
+        :param config: current Zemax configuration number
+        :param spaxels_per_slice: how many field points per slice we want to trace
+        :param surface: Zemax surface number we want to trace the rays to
+        :param ignore_vignetting: boolean, whether or not to ignore vignetting
+        :return:
+        """
+        start0 = time()
+
+        # Set Current Configuration
+        system.MCE.SetCurrentConfiguration(config)
+
+        # Get the Field Points for that configuration
+        sysField = system.SystemData.Fields
+        N_fields = sysField.NumberOfFields
+        N_waves = len(wavelength_idx)
+        N_rays = N_waves * spaxels_per_slice
+
+        fx_min, fy_min = sysField.GetField(1).X, sysField.GetField(1).Y
+        fx_max, fy_max = sysField.GetField(N_fields).X, sysField.GetField(N_fields).Y
+
+        # Watch Out! here we are assuming Rectangular Normalization
+        X_MAX = np.max([np.abs(sysField.GetField(i + 1).X) for i in range(N_fields)])
+        Y_MAX = np.max([np.abs(sysField.GetField(i + 1).Y) for i in range(N_fields)])
+
+        # Normalized field coordinates (hx, hy)
+        hx_min, hx_max = fx_min / X_MAX, fx_max / X_MAX
+        hy_min, hy_max = fy_min / Y_MAX, fy_max / Y_MAX
+
+        hx = np.linspace(hx_min, hx_max, spaxels_per_slice)
+        hy = np.linspace(hy_min, hy_max, spaxels_per_slice)
+
+        # The Field coordinates for the Object
+        obj_xy = np.array([X_MAX * hx, Y_MAX * hy]).T
+        foc_xy = np.empty((N_waves, spaxels_per_slice, 2))
+
+        raytrace = system.Tools.OpenBatchRayTrace()
+        normUnPolData = raytrace.CreateNormUnpol(N_rays, constants.RaysType_Real, surface)
+
+        # Loop over the wavelengths
+        for i_wave, wave_idx in enumerate(wavelength_idx):
+
+            # Loop over all Spaxels in the Slice
+            for j_field, (h_x, h_y) in enumerate(zip(hx, hy)):
+
+                # Add the ray to the RayTrace
+                normUnPolData.AddRay(wave_idx, h_x, h_y, 0, 0, constants.OPDMode_None)
+
+        # Run the RayTrace for the whole Slice
+        CastTo(raytrace, 'ISystemTool').RunAndWaitForCompletion()
+        # time_ray = time() - start
+        # print("Time spent running Raytrace: %.3f sec" % time_ray)
+
+        # start = time()
+        normUnPolData.StartReadingResults()
+
+        # Retrieve the results for the operands and raytrace
+        # Loop over the wavelengths
+        for i_wave, wave_idx in enumerate(wavelength_idx):
+            # Loop over all Spaxels in the Slice
+            for j_field, (h_x, h_y) in enumerate(zip(hx, hy)):
+
+                output = normUnPolData.ReadNextResult()
+                if ignore_vignetting == False:
+                    # We do care about vignetting
+                    if output[2] == 0 and output[3] == 0:
+                        x, y = output[4], output[5]
+                        foc_xy[i_wave, j_field, 0] = x
+                        foc_xy[i_wave, j_field, 1] = y
+
+                    elif output[2] == 0 and output[3] != 0:
+                        vignet_code = output[3]
+                        vignetting_surface = system.LDE.GetSurfaceAt(vignet_code).Comment
+                        print("\nConfig #%d | Wavelength idx #%d" % (config, wave_idx))
+                        fx, fy = h_x * X_MAX, h_y * Y_MAX
+                        print("Field point #%d : hx=%.4f hy=%.4f | fx=%.4f, fy=%.4f" % (j_field + 1, h_x, h_y, fx, fy))
+                        print("Vignetting at surface #%d: %s" % (vignet_code, vignetting_surface))
+                else:
+                    # If we don't care about vignetting (rays falling outside the active area of the detector, for example)
+                    # we add the Raytrace results to the focal coordinates array no matter what
+                    if output[2] == 0:
+                        x, y = output[4], output[5]
+                        foc_xy[i_wave, j_field, 0] = x
+                        foc_xy[i_wave, j_field, 1] = y
+
+        normUnPolData.ClearData()
+        CastTo(raytrace, 'ISystemTool').Close()
+        # time_res = time() - start
+        # print("Time spent reading results: %.3f sec" % time_res)
+
+        return [obj_xy, foc_xy]
+
+    def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
+                        configuration_idx=None, surface=None, spaxels_per_slice=3, ignore_vignetting=False,
+                        save_hdf5=False):
+        """
+        We loop over the Zemax files, calculating the Raytrace
+
+        The results will be (1) an OBJECT XY coordinates array of size [N_configs, spaxels_per_slice, 2], and
+        (2) a FOCAL XY coordinates array of size [N_configs, N_waves, spaxels_per_slice, 2], notice the wavelengths!
+
+        """
+
+        results_names = ['OBJ_XY', 'FOC_XY']
+        N_waves = 23 if wavelength_idx is None else len(wavelength_idx)
+        # we need to give the shapes of each array to self.run_analysis
+        results_shapes = [(spaxels_per_slice, 2), (N_waves, spaxels_per_slice, 2)]
+
+        metadata = {}
+        metadata['Spaxels per slice'] = spaxels_per_slice
+        metadata['Configurations'] = 'All' if configuration_idx is None else configuration_idx
+        metadata['Wavelengths'] = 'All' if wavelength_idx is None else wavelength_idx
+
+        # read the file options
+        file_list, sett_list = create_zemax_file_list(which_system=files_opt['which_system'],
+                                                      AO_modes=files_opt['AO_modes'], scales=files_opt['scales'],
+                                                      IFUs=files_opt['IFUs'], grating=files_opt['grating'])
+
+        # Loop over the Zemax files
+        results = []
+        for zemax_file, settings in zip(file_list, sett_list):
+
+            list_results = self.run_analysis(analysis_function=self.analysis_function_raytrace,
+                                             files_dir=files_dir, zemax_file=zemax_file, results_path=results_path,
+                                             results_shapes=results_shapes, results_names=results_names,
+                                             wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
+                                             ignore_vignetting=ignore_vignetting,
+                                             surface=surface, spaxels_per_slice=spaxels_per_slice)
+
+            results.append(list_results)
+
+            if save_hdf5 == True:
+                # We save the arrays in HDF5 format alongside the analysis metadata in case we want to look at it later
+                file_name = zemax_file.split('.')[0]
+                settings['surface'] = 'DETECTOR' if surface is None else surface
+                self.save_hdf5(analysis_name='RAYTRACE', analysis_metadata=metadata, list_results=list_results,
+                               results_names=results_names, file_name=file_name, file_settings=settings, results_dir=results_path)
+
+        return results
+
+
+
+class WavefrontsAnalysis(AnalysisFast):
+
+    def analysis_function_wavefronts(self, system, wavelength_idx, config, surface, sampling, coef_path, remove_slicer=False):
+
+        # Set Current Configuration
+        system.MCE.SetCurrentConfiguration(config)
+
+        # [WARNING]: for the 4x4 spaxel scale we noticed that a significant fraction of the rays get vignetted at the slicer
+        # this introduces a bias in the RMS WFE calculation. To avoid this, we modify the Image Slicer aperture definition
+        # so that all rays get through.
+        if remove_slicer is True:
+
+            # First of all, we need to find the Surface Number for the IMAGE SLICER
+            N_surfaces = system.LDE.NumberOfSurfaces
+            surface_names = {}      # A dictionary of surface number -> surface comment
+            for k in np.arange(1, N_surfaces):
+                surface_names[k] = system.LDE.GetSurfaceAt(k).Comment
+            # find the Slicer surface number
+            slicer_num = list(surface_names.keys())[list(surface_names.values()).index('IFU ISA')]
+            slicer = system.LDE.GetSurfaceAt(slicer_num)
+
+            # Read Current Aperture Settings
+            apt_type = slicer.ApertureData.CurrentType
+            # print("Aperture type: ", apt_type)
+            if apt_type == 4:  # 4 is Rectangular aperture
+                current_apt_sett = slicer.ApertureData.CurrentTypeSettings
+                # print("Current Settings:")
+                x0 = current_apt_sett._S_RectangularAperture.XHalfWidth
+                y0 = current_apt_sett._S_RectangularAperture.YHalfWidth
+                if y0 != 999:
+                    # Change Settings
+                    aperture_settings = slicer.ApertureData.CreateApertureTypeSettings(
+                        constants.SurfaceApertureTypes_RectangularAperture)
+                    aperture_settings._S_RectangularAperture.XHalfWidth = x0
+                    aperture_settings._S_RectangularAperture.YHalfWidth = 999
+                    slicer.ApertureData.ChangeApertureTypeSettings(aperture_settings)
+
+                    current_apt_sett = slicer.ApertureData.CurrentTypeSettings
+                    print("Changing aperture of surface: ", slicer.Comment)
+                    print("New Settings:")
+                    print("X_HalfWidth = %.2f" % current_apt_sett._S_RectangularAperture.XHalfWidth)
+                    print("Y_HalfWidth = %.2f" % current_apt_sett._S_RectangularAperture.YHalfWidth)
+
+        # Add a Zernike surface at the Entrance Pupil
+        # First we check whether we have already added
+        # surface_name2 = system.LDE.GetSurfaceAt(2).Comment
+        # if surface_name2 != "Zernike Correction":
+        #     print("Inserting new surface at #2")
+        #     # we have to add the surface
+        #     system.LDE.InsertNewSurfaceAt(2)
+        #     zernike_surface = system.LDE.GetSurfaceAt(2)
+        #     zernike_surface.Comment = "Zernike Correction"
+        #
+        #     types = zernike_surface.AvailableSurfaceTypes()
+        #     print(types)
+        #
+        #     print("Surface Type: ", system.LDE.GetSurfaceAt(2).TypeName)
+        #     SurfaceType = zernike_surface.GetSurfaceTypeSettings(ZOSAPI.Editors.LDE.SurfaceType.CoordinateBreak)
+        #     # SurfaceType = zernike_surface.GetSurfaceTypeSettings()
+        #     #
+        #     zernike_surface.ChangeType(constants.SurfaceType_ZernikeStandardPhase)
+        #
+        #     # Get aperture data
+        #     system_data = system.SystemData
+        #     system_aperture_value = system_data.Aperture.ApertureValue
+        #     system_aperture_type = system_data.Aperture.ApertureType
+        #
+        #     entrance_pupil_diam = system_aperture_value
+        #
+        # else:
+        #     print("Surface #2 is already: ", surface_name2)
+        #
+        # N_s = system.LDE.NumberOfSurfaces
+        # print(N_s)
+        # print("_______")
+
+        # Get the Field Points for that configuration
+        sysField = system.SystemData.Fields
+        N_fields = sysField.NumberOfFields
+        sysWave = system.SystemData.Wavelengths
+        N_waves = len(wavelength_idx)
+        N_rays = N_waves * 1
+
+        # Get the Field Point at the centre of the Slice
+        fx, fy = sysField.GetField(2).X, sysField.GetField(2).Y
+
+        # Note that this assumes Rectangular Normalization, the default in the E2E files.
+        X_MAX = np.max([np.abs(sysField.GetField(i + 1).X) for i in range(N_fields)])
+        Y_MAX = np.max([np.abs(sysField.GetField(i + 1).Y) for i in range(N_fields)])
+
+        # Normalized field coordinates (hx, hy)
+        hx, hy = fx / X_MAX, fy / Y_MAX
+
+        # The Field coordinates for the Object
+        obj_xy = np.array([fx, fy])
+        # RMS_WFE = np.empty((N_waves, spaxels_per_slice))
+        foc_xy = np.empty((N_waves, 2))
+
+        N_surfaces = system.LDE.NumberOfSurfaces
+
+        # check pupil sampling
+        samps = {'32x32': constants.SampleSizes_S_32x32,
+                 '64x64': constants.SampleSizes_S_64x64,
+                 '128x128': constants.SampleSizes_S_128x128,
+                 '256x256': constants.SampleSizes_S_256x256,
+                 '512x512': constants.SampleSizes_S_512x512,
+                 '1024x1024': constants.SampleSizes_S_1024x1024,
+                 '2048x2048': constants.SampleSizes_S_2048x2048,
+                 '4096x4096': constants.SampleSizes_S_4096x4096,
+                 '8192x8192': constants.SampleSizes_S_8192x8192,
+                 '16384x16384': constants.SampleSizes_S_16384x16384}
+        if sampling not in samps:
+            ValueError('sampling must be one of the following: ' +
+                       ', '.join(samps.keys()))
+
+        # # Get the Zernike Standard Coefficients for the Wavefront at the Detector
+        # # # set next wavelength
+        # wavelength = system.SystemData.Wavelengths.GetWavelength(wavelength_idx[0]).Wavelength
+        #
+        # analysis_coeffs = system.Analyses.New_Analysis(constants.AnalysisIDM_ZernikeStandardCoefficients)
+        # settings = analysis_coeffs.GetSettings()
+        # csettings = CastTo(settings, 'IAS_ZernikeStandardCoefficients')
+        # csettings.Surface.SetSurfaceNumber(N_surfaces)
+        # csettings.Wavelength.SetWavelengthNumber(wavelength)
+        # # csettings.Sampling = samps[sampling]
+        # csettings.Field.SetFieldNumber(2)
+        # analysis_coeffs.ApplyAndWaitForCompletion()
+        #
+        # results = analysis_coeffs.GetResults()
+        # cresults = CastTo(results, 'IAR_')
+        #
+        # # save results as a stupid text file because Zemax won't give you an array
+        # file_name = os.path.join(coef_path, 'result_config%d.txt' % config)
+        # cresults.GetTextFile(file_name)
+        #
+        # N_zern = 15
+        # std_coef = self.read_zernike_coefficients(file_name, N_zern=N_zern)
+        # print("Zernike Coefficients: ")
+        # print(std_coef)
+        # analysis_coeffs.Close()
+        #
+        # # Now we apply those Zernike coefficients as correction at the entrance pupil
+        #
+        # zernike_phase = system.LDE.GetSurfaceAt(2)
+        # print(zernike_phase.Comment)
+        # # Setting the N_terms to 0 removes all coefficients (sanity check)
+        # zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par13).IntegerValue = 0
+        # zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par13).IntegerValue = 5
+        # # Start with the terms again
+        #
+        # # Norm Radius
+        # system_aperture_diam = system.SystemData.Aperture.ApertureValue
+        # zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par14).DoubleValue = system_aperture_diam / 2
+        #
+        # list_params = [constants.SurfaceColumn_Par15, constants.SurfaceColumn_Par16, constants.SurfaceColumn_Par17,
+        #                constants.SurfaceColumn_Par18, constants.SurfaceColumn_Par19, constants.SurfaceColumn_Par20,
+        #                constants.SurfaceColumn_Par21, constants.SurfaceColumn_Par22, constants.SurfaceColumn_Par23,
+        #                constants.SurfaceColumn_Par24, constants.SurfaceColumn_Par25, constants.SurfaceColumn_Par26,
+        #                constants.SurfaceColumn_Par27, constants.SurfaceColumn_Par28, constants.SurfaceColumn_Par29]
+        #
+        # zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par15).DoubleValue = -std_coef[0]
+        # zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par16).DoubleValue = -std_coef[1]
+        # zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par17).DoubleValue = -std_coef[2]
+        # zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par18).DoubleValue = -std_coef[3]
+        # zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par19).DoubleValue = -std_coef[4]
+        # # zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par20).DoubleValue = -std_coef[5]
+        #
+        #
+        # # for k, param in enumerate(list_params[:N_zern]):
+        # #     a0 = zernike_phase.GetSurfaceCell(param).DoubleValue
+        # #     print(a0)
+        # #     zernike_phase.GetSurfaceCell(param).DoubleValue = -std_coef[k]
+        # a0 = zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par15).DoubleValue
+        # print(a0)
+
+        # iterate through wavelengths
+        for j, wave_idx in enumerate(wavelength_idx):
+
+            # set next wavelength
+            wavelength = system.SystemData.Wavelengths.GetWavelength(wave_idx).Wavelength
+
+            # open analysis
+            awfe = system.Analyses.New_Analysis(constants.AnalysisIDM_WavefrontMap)
+            settings = awfe.GetSettings()
+            csettings = CastTo(settings, 'IAS_WavefrontMap')
+
+            # setup analysis
+            csettings.Surface.SetSurfaceNumber(N_surfaces)
+            csettings.Wavelength.SetWavelengthNumber(wave_idx)  # always changing wave 1
+            csettings.Rotation = constants.Rotations_Rotate_0
+            csettings.Sampling = samps[sampling]
+            csettings.Polarization = constants.Polarizations_None
+            csettings.ReferenceToPrimary = False  # True --> lateral color
+            csettings.UseExitPupil = False
+            csettings.RemoveTilt = True  # True --> ref. to centroid
+            csettings.Subaperture_X = 0.
+            csettings.Subaperture_Y = 0.
+            csettings.Subaperture_R = 1.
+
+            # change field position
+            csettings.Field.SetFieldNumber(2)
+
+            # run analysis
+            awfe.ApplyAndWaitForCompletion()
+
+            # get results
+            results = awfe.GetResults()
+            cresults = CastTo(results, 'IAR_')
+            data = np.array(cresults.GetDataGrid(0).Values)
+            ptv_zos = float(cresults.HeaderData.Lines[2].split('=')[1].split(' ')[1])
+            rms_zos = float(cresults.HeaderData.Lines[2].split('=')[-1].split(' ')[1])
+            mdata = data - np.nanmean(data)
+            rms_wfe = np.sqrt(np.nanmean(mdata * mdata))
+            rms_wfe_nm = rms_wfe * wavelength * 1e3
+            # print(ptv_zos, rms_zos)
+
+            # plt.figure()
+            # plt.imshow(data, cmap='jet', origin='lower')
+            # plt.title(r'Wave: %.3f $\mu$m, Slice #%d | RMS: %.3f $\lambda$ (%.1f nm)' % (wavelength, config, rms_wfe, rms_wfe_nm))
+            # plt.colorbar()
+            # plt.show()
+
+        # close analysis
+        awfe.Close()
+        # data = np.zeros((1, 128, 128))
+
+        return [data, foc_xy]
+
+    @staticmethod
+    def read_zernike_coefficients(file_name, N_zern):
+        f = open(file_name, encoding="utf-16")
+        skiprows = 38
+        lines = f.readlines()[skiprows:]
+        coef = np.zeros(N_zern)
+        for k in range(N_zern):
+            # read the float coefficient in the text line
+            str_coef = re.findall("[+-]?\d+\.\d+", lines[k])[0]
+            # print(str_coef)
+            coef[k] = float(str_coef)
+        return coef
+
+    def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
+                        configuration_idx=None, surface=None, sampling=1024,
+                        save_hdf5=True, coef_path=None, remove_slicer_aperture=True):
+
+
+        # XXX
+        results_names = ['WAVEFRONT', 'FOC_XY']
+
+        N_waves = 23 if wavelength_idx is None else len(wavelength_idx)
+        # we need to give the shapes of each array to self.run_analysis
+        results_shapes = [(N_waves, sampling, sampling,), (N_waves, 2)]
+        sampling_str = '%sx%s' % (sampling, sampling)
+
+        metadata = {}
+        metadata['Sampling'] = sampling
+        metadata['Configurations'] = 'All' if configuration_idx is None else configuration_idx
+        metadata['Wavelengths'] = 'All' if wavelength_idx is None else wavelength_idx
+
+
+        # read the file options
+        file_list, sett_list = create_zemax_file_list(which_system=files_opt['which_system'],
+                                                      AO_modes=files_opt['AO_modes'], scales=files_opt['scales'],
+                                                      IFUs=files_opt['IFUs'], grating=files_opt['grating'])
+
+        # Loop over the Zemax files
+        results = []
+        for zemax_file, settings in zip(file_list, sett_list):
+
+            list_results = self.run_analysis(analysis_function=self.analysis_function_wavefronts,
+                                             files_dir=files_dir, zemax_file=zemax_file, results_path=results_path,
+                                             results_shapes=results_shapes, results_names=results_names,
+                                             wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
+                                             surface=surface, sampling=sampling_str,
+                                             coef_path=coef_path, remove_slicer=remove_slicer_aperture)
+
+            results.append(list_results)
 
         return results
 
