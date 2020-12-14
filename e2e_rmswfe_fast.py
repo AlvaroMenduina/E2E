@@ -160,18 +160,18 @@ def detector_rms_wfe(zosapi, file_options, spaxels_per_slice, pupil_sampling, fi
     Calculate the RMS WFE for a given system mode (typically HARMONI), AO mode, spaxel scale
     and spectral band, at the DETECTOR PLANE
 
-    We loop over the IFU channel and calculate, for each E2E file, the RMS WFE for all wavelengths and configurations
+    We loop over the IFU channels and calculate, for each E2E file, the RMS WFE for all wavelengths and configurations
     We can specify the number of points per slice [spaxels per slice] to use for the calculation (typically 3)
     The results are plotted:
         (1) at the DETECTOR plane for all wavelengths
         (2) at the OBJECT plane (stitching all IFU channels) for the Min, Central and Max wavelength
 
+    In order to accommodate both Nominal Design and Monte Carlo files, we have abstracted most of the parameters
+    into the "file_options" dictionary
+
     :param zosapi: the Zemax API
-    :param sys_mode: [str] the system mode, either 'HARMONI', 'ELT' or 'IFS
-    :param ao_modes: [list] containing the AO mode we want. Only 1 should be used
-    :param spaxel_scale: [str] the spaxel scale, ex. '60x30'
+    :param file_options: dictionary containing the different parameters
     :param spaxels_per_slice: number of field points per slice to use for the calculation
-    :param grating: [str] the spectral band to analyze, ex. 'HK'
     :param pupil_sampling: the pupil sampling for the RWRE operand, representing a grid of N x N per pupil quadrant
     :param files_path: path to the E2E files to load for the analysis
     :param results_path: path to save the results
@@ -196,7 +196,7 @@ def detector_rms_wfe(zosapi, file_options, spaxels_per_slice, pupil_sampling, fi
     rms_maps, object_coord, focal_coord = [], [], []        # Lists to save the results for each IFU channel
     for ifu_section in ifu_sections:
 
-        # change the IFU path option
+        # change the IFU path option to the current IFU section
         file_options['IFU_PATH'] = ifu_section
 
         if monte_carlo is True:
@@ -204,9 +204,11 @@ def detector_rms_wfe(zosapi, file_options, spaxels_per_slice, pupil_sampling, fi
             ifu_mc = file_options['IFU_PATHS_MC'][ifu_section]
             file_options['IFU_MC'] = ifu_mc
 
-        # options = {'which_system': sys_mode, 'AO_modes': ao_modes, 'scales': [spaxel_scale], 'IFUs': [ifu_section],
-        #            'grating': [grating]}
+            # select the proper ISP MC instance, according to the IFU path
+            isp_mc = file_options['IFU_ISP_MC'][ifu_section]
+            file_options['ISP_MC'] = isp_mc
 
+        # Run the Analysis for a given E2E file, corresponding to a single IFU path and ISP
         list_results = analysis.loop_over_files(files_dir=files_path, files_opt=file_options, results_path=results_path,
                                                 wavelength_idx=None, configuration_idx=None,
                                                 surface=None, spaxels_per_slice=spaxels_per_slice,
@@ -214,23 +216,12 @@ def detector_rms_wfe(zosapi, file_options, spaxels_per_slice, pupil_sampling, fi
                                                 monte_carlo=monte_carlo)
 
         rms_wfe, obj_xy, foc_xy, waves = list_results[0]    # Only 1 item on the list, no Monte Carlo files
-        # print(rms_wfe.shape)
 
         # print a summary to spot any issues:
         print("\nFor %s scale, IFU-%s, SPEC-%s: " % (spaxel_scale, ifu_section, grating))
         print("RMS: min %.2f | mean %.2f | max %.2f nm " % (np.min(rms_wfe), np.mean(rms_wfe), np.max(rms_wfe)))
 
-        # import matplotlib.cm as cm
-        # colors = cm.Reds(np.linspace(0.5, 1.0, 76))
-        # for j in range(23):
-        #     plt.figure()
-        #     for k in range(76):
-        #         x = obj_xy[k, :, 0]
-        #         plt.plot(x, rms_wfe[k, j, :], color=colors[k])
-        #         plt.scatter(x, rms_wfe[k, j, :], color=colors[k], s=10)
-        #         plt.xlabel('Along Slice')
-        # plt.show()
-
+        # Add the results to a list that covers all IFU paths
         rms_maps.append(rms_wfe)
         focal_coord.append(foc_xy)
         object_coord.append(obj_xy)
@@ -238,11 +229,12 @@ def detector_rms_wfe(zosapi, file_options, spaxels_per_slice, pupil_sampling, fi
     # Stitch the different IFU sections
     rms_field = np.concatenate(rms_maps, axis=1)
 
+    # Read the RMS WFE Requirement for the particular Spaxel Scale
     req = RMS_WFE[spaxel_scale]
 
-    min_rms = 0
+    # min_rms = 0
     max_rms = req
-    # min_rms = np.min(rms_field)
+    min_rms = np.min(rms_field)
     # max_rms = np.max(rms_field)
 
     # (1) DETECTOR plane plot
@@ -257,11 +249,19 @@ def detector_rms_wfe(zosapi, file_options, spaxels_per_slice, pupil_sampling, fi
             _foc_xy = focal_coord[k]
             _rms_field = rms_maps[k]
 
+            plt.figure()
+            plt.imshow(_rms_field, cmap='jet')
+            plt.show()
+
+            # This is where we create the Detector plane maps
+            # We separate the Odd and Even configurations as these represent the two sides of the detector
+
             x_odd, y_odd = _foc_xy[::2, :, :, 0].flatten(), _foc_xy[::2, :, :, 1].flatten()
             x_even, y_even = _foc_xy[1::2, :, :, 0].flatten(), _foc_xy[1::2, :, :, 1].flatten()
             triang_odd = tri.Triangulation(x_odd, y_odd)
             triang_even = tri.Triangulation(x_even, y_even)
 
+            # We fix the triangulation to avoid getting weird artifacts
             min_circle_ratio = .05
             mask_odd = tri.TriAnalyzer(triang_odd).get_flat_tri_mask(min_circle_ratio)
             triang_odd.set_mask(mask_odd)
@@ -282,7 +282,10 @@ def detector_rms_wfe(zosapi, file_options, spaxels_per_slice, pupil_sampling, fi
             cbar = plt.colorbar(tpc_odd, ax=ax, orientation='horizontal')
             cbar.ax.set_xlabel('[nm]')
 
-            title = r'IFU-%s | %s | %s | %s | Req: %d nm' % (ifu_section, spaxel_scale, grating, ao_mode, req)
+            if monte_carlo is False:
+                title = r'IFU-%s | %s | %s | %s | Req: %d nm' % (ifu_section, spaxel_scale, grating, ao_mode, req)
+            else:
+                title = r'IFU-%s | %s | %s | %s MC | Req: %d nm' % (ifu_section, spaxel_scale, grating, ao_mode, req)
             ax.set_title(title)
 
     fig_name = "RMSWFE_%s_DETECTOR_SPEC_%s_MODE_%s" % (spaxel_scale, grating, ao_mode)
@@ -295,6 +298,9 @@ def detector_rms_wfe(zosapi, file_options, spaxels_per_slice, pupil_sampling, fi
     N_waves = len(waves)
     rms_maps = np.array(rms_maps)
     object_coord = np.array(object_coord)
+
+    np.save(os.path.join(save_path, 'rms_maps'), rms_maps)
+    np.save(os.path.join(save_path, 'object_coord'), object_coord)
 
     # (2) Stitch the Object space coordinates
     # min_rms, max_rms = np.min(rms_maps), np.max(rms_maps)
@@ -350,36 +356,38 @@ if __name__ == """__main__""":
     # Create a Python Standalone Application
     psa = e2e.PythonStandaloneApplication()
 
-    # # [*] Monte Carlo Instances [*]
+    # [*] Monte Carlo Instances [*]
+    ao_mode = 'NOAO'
+    spaxel_scale = '60x30'
+    spaxels_per_slice = 3       # How many field points per Slice to use
+    pupil_sampling = 4          # N x N grid per pupil quadrant. See Zemax Operand help for RWRE
+    # gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_SHORT', 'K_LONG']
+    gratings = ['H']
+    file_options = {'MONTE_CARLO': True, 'AO_MODE': ao_mode, 'SPAX_SCALE': spaxel_scale, 'SLICE_SAMPLING': spaxels_per_slice,
+                    'FPRS_MC': '0694', 'IPO_MC': '0055', 'IFU_PATHS_MC': {'AB': '0028', 'CD': '0068', 'EF': '0071', 'GH': '0095'},
+                    'IFU_ISP_MC': {'AB': '0024', 'CD': '0009', 'EF': '0013', 'GH': '0073'}}
+    # To make it realistic, each IFU path must have a different MC instance of the ISP
+
+    files_path = os.path.abspath("D:/End to End Model/Monte_Carlo_Dec/Median")
+    results_path = os.path.abspath("D:/End to End Model/Monte_Carlo_Dec/Median/Results/Mode_%s/Scale_%s" % (ao_mode, spaxel_scale))
+    # [*] Monte Carlo Instances [*]
+
+    # # [*] This is the bit we have to change when you run the analysis in your system [*]
+    # sys_mode = 'HARMONI'
+    # ao_modes = ['NOAO']
     # ao_mode = 'NOAO'
-    # spaxel_scale = '4x4'
+    # spaxel_scale = '60x30'
     # spaxels_per_slice = 3       # How many field points per Slice to use
     # pupil_sampling = 4          # N x N grid per pupil quadrant. See Zemax Operand help for RWRE
     # gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_SHORT', 'K_LONG']
-    # # gratings = ['VIS']
-    # file_options = {'MONTE_CARLO': True, 'AO_MODE': ao_mode, 'SPAX_SCALE': spaxel_scale, 'SLICE_SAMPLING': spaxels_per_slice,
-    #                 'FPRS_MC': '0694', 'IPO_MC': '0058', 'IFU_PATHS_MC': {'AB': '0028', 'CD': '0007'}, 'ISP_MC': '0024'}
+    # # gratings = ['H', 'HK']
     #
-    # files_path = os.path.abspath("D:/End to End Model/Monte_Carlo_Dec/Median")
-    # results_path = os.path.abspath("D:/End to End Model/Monte_Carlo_Dec/Median/Results/Mode_%s/Scale_%s" % (ao_mode, spaxel_scale))
-    # # [*] Monte Carlo Instances [*]
-
-    # [*] This is the bit we have to change when you run the analysis in your system [*]
-    sys_mode = 'HARMONI'
-    ao_modes = ['NOAO']
-    ao_mode = 'NOAO'
-    spaxel_scale = '20x20'
-    spaxels_per_slice = 3       # How many field points per Slice to use
-    pupil_sampling = 4          # N x N grid per pupil quadrant. See Zemax Operand help for RWRE
-    gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_SHORT', 'K_LONG']
-    # gratings = ['H', 'HK']
-
-    file_options = {'MONTE_CARLO': False, 'which_system': sys_mode, 'AO_modes': ao_modes,
-                    'SPAX_SCALE': spaxel_scale, 'AO_MODE': ao_modes[0]}
-
-    files_path = os.path.abspath("D:/End to End Model/August_2020")
-    results_path = os.path.abspath("D:/End to End Model/Results_ReportAugust/Mode_%s/Scale_%s" % (ao_modes[0], spaxel_scale))
-    # [*] This is the bit we have to change when you run the analysis in your system [*]
+    # file_options = {'MONTE_CARLO': False, 'which_system': sys_mode, 'AO_modes': ao_modes,
+    #                 'SPAX_SCALE': spaxel_scale, 'AO_MODE': ao_modes[0]}
+    #
+    # files_path = os.path.abspath("D:/End to End Model/August_2020")
+    # results_path = os.path.abspath("D:/End to End Model/Results_ReportAugust/Mode_%s/Scale_%s" % (ao_modes[0], spaxel_scale))
+    # # [*] This is the bit we have to change when you run the analysis in your system [*]
 
     analysis_dir = os.path.join(results_path, 'RMS_WFE')
     print("Analysis Results will be saved in folder: ", analysis_dir)
