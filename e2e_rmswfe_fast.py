@@ -29,6 +29,7 @@ import e2e_analysis as e2e
 import matplotlib.pyplot as plt
 import matplotlib.tri as tri
 from matplotlib.patches import Rectangle
+from scipy.interpolate import interp1d, griddata
 import pandas as pd
 import seaborn as sns
 from time import time
@@ -309,10 +310,6 @@ def detector_rms_wfe(zosapi, file_options, spaxels_per_slice, pupil_sampling, fi
             _foc_xy = focal_coord[k]
             _rms_field = rms_maps[k]
 
-            plt.figure()
-            plt.imshow(_rms_field, cmap='jet')
-            plt.show()
-
             # This is where we create the Detector plane maps
             # We separate the Odd and Even configurations as these represent the two sides of the detector
 
@@ -359,31 +356,56 @@ def detector_rms_wfe(zosapi, file_options, spaxels_per_slice, pupil_sampling, fi
     rms_maps = np.array(rms_maps)
     object_coord = np.array(object_coord)
 
-    np.save(os.path.join(save_path, 'rms_maps'), rms_maps)
-    np.save(os.path.join(save_path, 'object_coord'), object_coord)
-
     # (2) Stitch the Object space coordinates
-    # We create a plot for each case of Minimum, Central and Maximum Wavelength in the spectral band
     for k_wave, wave_str in zip([0, N_waves // 2, -1], ['MIN', 'CENT', 'MAX']):
-        fig_obj, ax = plt.subplots(1, 1)
+        data = rms_maps[:, :, k_wave].flatten()
         x_obj, y_obj = object_coord[:, :, :, 0].flatten(), object_coord[:, :, :, 1].flatten()
 
         # we have to transform the object coordinates [mm] into arcseconds using the plate scales
         x_obj /= plate_scale
         y_obj /= plate_scale
 
-        triang = tri.Triangulation(x_obj, y_obj)
-        rms_ = rms_maps[:, :, k_wave].flatten()
-        tpc = ax.tripcolor(triang, rms_, shading='flat', cmap='jet')
-        tpc.set_clim(vmin=min_rms, vmax=max_rms)
-        # ax.scatter(x_obj, y_obj, s=3, color='black')
+        N_samples = x_obj.shape[0]
+        Nx = 76  # Number of pixels along the slice to interpolate to.
+        xhi, yhi, dhi = [], [], []
+        for i in np.arange(0, N_samples, spaxels_per_slice):
+            xlo, ylo = x_obj[i:i + spaxels_per_slice], y_obj[i:i + spaxels_per_slice]
+            dlo = data[i:i + spaxels_per_slice]
+            xmin, xmax = np.min(xlo), np.max(xlo)
+            # ymin, ymax = np.min(ylo), np.max(ylo)
 
+            yi = np.linspace(ylo.mean(), ylo.mean(), Nx)  # Collapse Y (across slice)
+            xi = np.linspace(xmin, xmax, Nx)  # Linear sample along slice
+
+            # Need to use scipy interpolation version, as some slices have decreasing Y values.
+            f = interp1d(xlo, dlo, assume_sorted=False)
+            di = f(xi)  # Interpolate WFE values along slice
+
+            xhi.append(xi)
+            yhi.append(yi)
+            dhi.append(di)
+
+        xhi = np.array(xhi).flatten()
+        yhi = np.array(yhi).flatten()
+        dhi = np.array(dhi).flatten()
+
+        xmin, xmax = np.min(xhi), np.max(xhi)
+        ymin, ymax = np.min(yhi), np.max(yhi)
+
+        # Define a regular grid onto which we will interpolate the data
+        # Used 204 x 152 pixels, which is the total field of view in spaxels.
+        xi, yi = np.mgrid[xmin:xmax:204j, ymin:ymax:152j]  # 204 pixels by 152 slices
+        # zi = griddata((xhi[good], yhi[good]), dhi[good], (xi, yi), method='linear')  # Nearest or linear.
+        zi = griddata((xhi, yhi), dhi, (xi, yi), method='nearest')  # Nearest or linear.
+
+        fig_obj, ax = plt.subplots(1, 1)
+        img = ax.imshow(zi.T, interpolation='none', cmap='jet', origin='lower left', extent=[xmin, xmax, ymin, ymax])
+        img.set_clim(vmin=min_rms, vmax=max_rms)
+        cbar = plt.colorbar(img, ax=ax, orientation='horizontal')
+        cbar.ax.set_xlabel('[nm]')
         axis_label = 'Object'
         ax.set_xlabel(axis_label + r' X [arcsec]')
         ax.set_ylabel(axis_label + r' Y [arcsec]')
-        ax.set_aspect('equal')
-        cbar = plt.colorbar(tpc, ax=ax, orientation='horizontal')
-        cbar.ax.set_xlabel('[nm]')
 
         wave = waves[k_wave]
 
@@ -393,11 +415,48 @@ def detector_rms_wfe(zosapi, file_options, spaxels_per_slice, pupil_sampling, fi
             title = r'%s mas | %s SPEC %.3f $\mu$m | %s MC' % (spaxel_scale, grating, wave, ao_mode)
         ax.set_title(title)
 
-        fig_name = "RMSWFE_OBJECT_%s_SPEC_%s_MODE_%s_WAVE_%s" % (spaxel_scale, grating, ao_mode, wave_str)
+        fig_name = "RMSWFE_OBJECT_INTERP_%s_SPEC_%s_MODE_%s_WAVE_%s" % (spaxel_scale, grating, ao_mode, wave_str)
         save_path = os.path.join(results_path, analysis_dir)
         if os.path.isfile(os.path.join(save_path, fig_name)):
             os.remove(os.path.join(save_path, fig_name))
         fig_obj.savefig(os.path.join(save_path, fig_name))
+
+    # (2) Stitch the Object space coordinates
+    # # We create a plot for each case of Minimum, Central and Maximum Wavelength in the spectral band
+    # for k_wave, wave_str in zip([0, N_waves // 2, -1], ['MIN', 'CENT', 'MAX']):
+    #     fig_obj, ax = plt.subplots(1, 1)
+    #     x_obj, y_obj = object_coord[:, :, :, 0].flatten(), object_coord[:, :, :, 1].flatten()
+    #
+    #     # we have to transform the object coordinates [mm] into arcseconds using the plate scales
+    #     x_obj /= plate_scale
+    #     y_obj /= plate_scale
+    #
+    #     triang = tri.Triangulation(x_obj, y_obj)
+    #     rms_ = rms_maps[:, :, k_wave].flatten()
+    #     tpc = ax.tripcolor(triang, rms_, shading='flat', cmap='jet')
+    #     tpc.set_clim(vmin=min_rms, vmax=max_rms)
+    #     # ax.scatter(x_obj, y_obj, s=3, color='black')
+    #
+    #     axis_label = 'Object'
+    #     ax.set_xlabel(axis_label + r' X [arcsec]')
+    #     ax.set_ylabel(axis_label + r' Y [arcsec]')
+    #     ax.set_aspect('equal')
+    #     cbar = plt.colorbar(tpc, ax=ax, orientation='horizontal')
+    #     cbar.ax.set_xlabel('[nm]')
+    #
+    #     wave = waves[k_wave]
+    #
+    #     if monte_carlo is False:
+    #         title = r'%s mas | %s SPEC %.3f $\mu$m | %s' % (spaxel_scale, grating, wave, ao_mode)
+    #     else:
+    #         title = r'%s mas | %s SPEC %.3f $\mu$m | %s MC' % (spaxel_scale, grating, wave, ao_mode)
+    #     ax.set_title(title)
+    #
+    #     fig_name = "RMSWFE_OBJECT_%s_SPEC_%s_MODE_%s_WAVE_%s" % (spaxel_scale, grating, ao_mode, wave_str)
+    #     save_path = os.path.join(results_path, analysis_dir)
+    #     if os.path.isfile(os.path.join(save_path, fig_name)):
+    #         os.remove(os.path.join(save_path, fig_name))
+    #     fig_obj.savefig(os.path.join(save_path, fig_name))
 
     return rms_field
 
@@ -437,7 +496,7 @@ if __name__ == """__main__""":
     sys_mode = 'HARMONI'
     ao_modes = ['NOAO']
     ao_mode = 'NOAO'
-    spaxel_scale = '20x20'
+    spaxel_scale = '4x4'
     spaxels_per_slice = 3       # How many field points per Slice to use
     pupil_sampling = 4          # N x N grid per pupil quadrant. See Zemax Operand help for RWRE
     # gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_SHORT', 'K_LONG']
@@ -455,12 +514,12 @@ if __name__ == """__main__""":
     if not os.path.exists(analysis_dir):
         os.mkdir(analysis_dir)
 
-    # (0) First we want to justify the choice of Pupil Sampling.
-    # Comment this out if you want to run the normal analysis
-    for grating in gratings:
-        file_options['GRATING'] = grating
-        pupil_sampling_effect(zosapi=psa, file_options=file_options, spaxels_per_slice=spaxels_per_slice,
-                              files_path=files_path, results_path=results_path)
+    # # (0) First we want to justify the choice of Pupil Sampling.
+    # # Comment this out if you want to run the normal analysis
+    # for grating in gratings:
+    #     file_options['GRATING'] = grating
+    #     pupil_sampling_effect(zosapi=psa, file_options=file_options, spaxels_per_slice=spaxels_per_slice,
+    #                           files_path=files_path, results_path=results_path)
 
     # (1) First of all, we save a txt file with the MC Instances used to generate the E2E files (if running MC mode)
     # for each of the subsystems, as well as the slice sampling (field points per slice)
@@ -478,8 +537,6 @@ if __name__ == """__main__""":
         rms_grating.append(rms.flatten())
 
     rms_grating = np.array(rms_grating).T
-
-
 
     # We will save the results in a .txt file
     file_name = 'RMS_WFE_%s_%s_Percentiles.txt' % (ao_mode, spaxel_scale)
@@ -534,18 +591,3 @@ if __name__ == """__main__""":
     fig_box.savefig(os.path.join(analysis_dir, fig_name))
 
     plt.show()
-
-
-    def my_function(self, x):
-        s = x**2
-        return s
-
-    class MyObject(object):
-
-        def __init__(self, funct=my_function):
-
-            MyObject.funct = funct
-
-
-    obj = MyObject()
-    print(obj.funct)

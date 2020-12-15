@@ -699,6 +699,56 @@ def create_zemax_file_list(which_system,
     return
 
 
+def expand_slicer_aperture(system):
+    """
+    For the 4x4 spaxel scale, a significant fraction of the rays can sometimes get vignetted at the Image Slicer
+    This introduces a bias in the RMS WFE calculation. To avoid this, we modify the Image Slicer aperture definition
+    so that all rays get through. Consequently, enough pupil rays are traced to get an unbiased estimation of RMS WFE
+
+    :param system: the Optical System
+    :return:
+    """
+
+    # First of all, we need to find the Surface Number for the IMAGE SLICER
+    N_surfaces = system.LDE.NumberOfSurfaces
+    surface_names = {}  # A dictionary of surface number -> surface comment
+    for k in np.arange(1, N_surfaces):
+        surface_names[k] = system.LDE.GetSurfaceAt(k).Comment
+    # find the Slicer surface number
+    try:
+        # The naming convention for this surface has changed. Not the same for Nominal Design as Monte Carlos
+        slicer_num = list(surface_names.keys())[list(surface_names.values()).index('Slicer Mirror')]
+    except ValueError:
+        slicer_num = list(surface_names.keys())[list(surface_names.values()).index('IFU ISA')]
+    slicer = system.LDE.GetSurfaceAt(slicer_num)
+
+    # Read Current Aperture Settings
+    apt_type = slicer.ApertureData.CurrentType
+    # print("Aperture type: ", apt_type)
+    if apt_type == 4:  # 4 is Rectangular aperture
+        current_apt_sett = slicer.ApertureData.CurrentTypeSettings
+        # print("Current Settings:")
+        x0 = current_apt_sett._S_RectangularAperture.XHalfWidth
+        y0 = current_apt_sett._S_RectangularAperture.YHalfWidth
+        # If the Y aperture hasn't been changed already, we change it here to 999 mm to get all rays through
+        if y0 != 999:
+            # Change Settings
+            aperture_settings = slicer.ApertureData.CreateApertureTypeSettings(
+                constants.SurfaceApertureTypes_RectangularAperture)
+            aperture_settings._S_RectangularAperture.XHalfWidth = x0
+            aperture_settings._S_RectangularAperture.YHalfWidth = 999
+            slicer.ApertureData.ChangeApertureTypeSettings(aperture_settings)
+
+            current_apt_sett = slicer.ApertureData.CurrentTypeSettings
+            # Notify that we have successfully modified the aperture
+            print("Changing aperture of surface: ", slicer.Comment)
+            print("New Settings:")
+            print("X_HalfWidth = %.2f" % current_apt_sett._S_RectangularAperture.XHalfWidth)
+            print("Y_HalfWidth = %.2f" % current_apt_sett._S_RectangularAperture.YHalfWidth)
+
+    return
+
+
 class AnalysisGeneric(object):
 
     """
@@ -1575,41 +1625,43 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
         # so that all rays get through. Consequently, enough pupil rays are traced to get an unbiased estimation of RMS WFE
         if remove_slicer is True:
 
-            # First of all, we need to find the Surface Number for the IMAGE SLICER
-            N_surfaces = system.LDE.NumberOfSurfaces
-            surface_names = {}      # A dictionary of surface number -> surface comment
-            for k in np.arange(1, N_surfaces):
-                surface_names[k] = system.LDE.GetSurfaceAt(k).Comment
-            # find the Slicer surface number
-            try:
-                # The naming convention for this surface has changed. Not the same for Nominal Design as Monte Carlos
-                slicer_num = list(surface_names.keys())[list(surface_names.values()).index('Slicer Mirror')]
-            except ValueError:
-                slicer_num = list(surface_names.keys())[list(surface_names.values()).index('IFU ISA')]
-            slicer = system.LDE.GetSurfaceAt(slicer_num)
+            expand_slicer_aperture(system)
 
-            # Read Current Aperture Settings
-            apt_type = slicer.ApertureData.CurrentType
-            # print("Aperture type: ", apt_type)
-            if apt_type == 4:  # 4 is Rectangular aperture
-                current_apt_sett = slicer.ApertureData.CurrentTypeSettings
-                # print("Current Settings:")
-                x0 = current_apt_sett._S_RectangularAperture.XHalfWidth
-                y0 = current_apt_sett._S_RectangularAperture.YHalfWidth
-                # If the Y aperture hasn't been changed already, we change it here to 999 mm to get all rays through
-                if y0 != 999:
-                    # Change Settings
-                    aperture_settings = slicer.ApertureData.CreateApertureTypeSettings(constants.SurfaceApertureTypes_RectangularAperture)
-                    aperture_settings._S_RectangularAperture.XHalfWidth = x0
-                    aperture_settings._S_RectangularAperture.YHalfWidth = 999
-                    slicer.ApertureData.ChangeApertureTypeSettings(aperture_settings)
-
-                    current_apt_sett = slicer.ApertureData.CurrentTypeSettings
-                    # Notify that we have successfully modified the aperture
-                    print("Changing aperture of surface: ", slicer.Comment)
-                    print("New Settings:")
-                    print("X_HalfWidth = %.2f" % current_apt_sett._S_RectangularAperture.XHalfWidth)
-                    print("Y_HalfWidth = %.2f" % current_apt_sett._S_RectangularAperture.YHalfWidth)
+            # # First of all, we need to find the Surface Number for the IMAGE SLICER
+            # N_surfaces = system.LDE.NumberOfSurfaces
+            # surface_names = {}      # A dictionary of surface number -> surface comment
+            # for k in np.arange(1, N_surfaces):
+            #     surface_names[k] = system.LDE.GetSurfaceAt(k).Comment
+            # # find the Slicer surface number
+            # try:
+            #     # The naming convention for this surface has changed. Not the same for Nominal Design as Monte Carlos
+            #     slicer_num = list(surface_names.keys())[list(surface_names.values()).index('Slicer Mirror')]
+            # except ValueError:
+            #     slicer_num = list(surface_names.keys())[list(surface_names.values()).index('IFU ISA')]
+            # slicer = system.LDE.GetSurfaceAt(slicer_num)
+            #
+            # # Read Current Aperture Settings
+            # apt_type = slicer.ApertureData.CurrentType
+            # # print("Aperture type: ", apt_type)
+            # if apt_type == 4:  # 4 is Rectangular aperture
+            #     current_apt_sett = slicer.ApertureData.CurrentTypeSettings
+            #     # print("Current Settings:")
+            #     x0 = current_apt_sett._S_RectangularAperture.XHalfWidth
+            #     y0 = current_apt_sett._S_RectangularAperture.YHalfWidth
+            #     # If the Y aperture hasn't been changed already, we change it here to 999 mm to get all rays through
+            #     if y0 != 999:
+            #         # Change Settings
+            #         aperture_settings = slicer.ApertureData.CreateApertureTypeSettings(constants.SurfaceApertureTypes_RectangularAperture)
+            #         aperture_settings._S_RectangularAperture.XHalfWidth = x0
+            #         aperture_settings._S_RectangularAperture.YHalfWidth = 999
+            #         slicer.ApertureData.ChangeApertureTypeSettings(aperture_settings)
+            #
+            #         current_apt_sett = slicer.ApertureData.CurrentTypeSettings
+            #         # Notify that we have successfully modified the aperture
+            #         print("Changing aperture of surface: ", slicer.Comment)
+            #         print("New Settings:")
+            #         print("X_HalfWidth = %.2f" % current_apt_sett._S_RectangularAperture.XHalfWidth)
+            #         print("Y_HalfWidth = %.2f" % current_apt_sett._S_RectangularAperture.YHalfWidth)
 
         # [1] Some housekeeping and pre-processing operations
         # Get the Field Points for that configuration
@@ -1758,8 +1810,8 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
                     vignetting_code = output[3]
                     if vignetting_code != 0:
                         vignetting_surface = system.LDE.GetSurfaceAt(vignetting_code).Comment
-                        print("\nConfig #%d" % (config))
-                        print("Vignetting at surface #%d: %s" % (vignetting_code, vignetting_surface))
+                        # print("\nConfig #%d" % (config))
+                        # print("Vignetting at surface #%d: %s" % (vignetting_code, vignetting_surface))
             # if config == 1:
             #     raise ValueError
 
@@ -2685,6 +2737,21 @@ class Raytrace_FastAnalysis(AnalysisFast):
         return results
 
 
+class WavefrontsAnalysisMC(AnalysisFast):
+    """
+    Getting the Wavefront Maps for the Monte Carlo files
+    """
+
+    def analysis_function_wavefronts(self, system, wavelength_idx, config, surface, remove_slicer=False):
+
+        # Set Current Configuration
+        system.MCE.SetCurrentConfiguration(config)
+
+        # [WARNING]: for the 4x4 spaxel scale we noticed that a significant fraction of the rays get vignetted at the slicer
+        # this introduces a bias in the RMS WFE calculation. To avoid this, we modify the Image Slicer aperture definition
+        # so that all rays get through.
+        if remove_slicer is True:
+            expand_slicer_aperture(system)
 
 class WavefrontsAnalysis(AnalysisFast):
 
@@ -2697,37 +2764,7 @@ class WavefrontsAnalysis(AnalysisFast):
         # this introduces a bias in the RMS WFE calculation. To avoid this, we modify the Image Slicer aperture definition
         # so that all rays get through.
         if remove_slicer is True:
-
-            # First of all, we need to find the Surface Number for the IMAGE SLICER
-            N_surfaces = system.LDE.NumberOfSurfaces
-            surface_names = {}      # A dictionary of surface number -> surface comment
-            for k in np.arange(1, N_surfaces):
-                surface_names[k] = system.LDE.GetSurfaceAt(k).Comment
-            # find the Slicer surface number
-            slicer_num = list(surface_names.keys())[list(surface_names.values()).index('IFU ISA')]
-            slicer = system.LDE.GetSurfaceAt(slicer_num)
-
-            # Read Current Aperture Settings
-            apt_type = slicer.ApertureData.CurrentType
-            # print("Aperture type: ", apt_type)
-            if apt_type == 4:  # 4 is Rectangular aperture
-                current_apt_sett = slicer.ApertureData.CurrentTypeSettings
-                # print("Current Settings:")
-                x0 = current_apt_sett._S_RectangularAperture.XHalfWidth
-                y0 = current_apt_sett._S_RectangularAperture.YHalfWidth
-                if y0 != 999:
-                    # Change Settings
-                    aperture_settings = slicer.ApertureData.CreateApertureTypeSettings(
-                        constants.SurfaceApertureTypes_RectangularAperture)
-                    aperture_settings._S_RectangularAperture.XHalfWidth = x0
-                    aperture_settings._S_RectangularAperture.YHalfWidth = 999
-                    slicer.ApertureData.ChangeApertureTypeSettings(aperture_settings)
-
-                    current_apt_sett = slicer.ApertureData.CurrentTypeSettings
-                    print("Changing aperture of surface: ", slicer.Comment)
-                    print("New Settings:")
-                    print("X_HalfWidth = %.2f" % current_apt_sett._S_RectangularAperture.XHalfWidth)
-                    print("Y_HalfWidth = %.2f" % current_apt_sett._S_RectangularAperture.YHalfWidth)
+            expand_slicer_aperture(system)
 
         # Add a Zernike surface at the Entrance Pupil
         # First we check whether we have already added
