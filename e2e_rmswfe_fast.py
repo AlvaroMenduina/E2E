@@ -474,7 +474,7 @@ if __name__ == """__main__""":
     plate_scale = 3.316
 
     # Nominal requirements for RMS WFE
-    RMS_WFE = {'4x4': 87, '10x10': 134, '20x20': 259, '60x30': 553}
+    RMS_WFE = {'4x4': 81, '10x10': 123, '20x20': 254, '60x30': 590}
 
     # Create a Python Standalone Application
     psa = e2e.PythonStandaloneApplication()
@@ -499,7 +499,7 @@ if __name__ == """__main__""":
     # This is the bit we have to change when you run the analysis in your system
     sys_mode = 'HARMONI'
     ao_modes = ['LTAO']
-    ao_mode = 'NOAO'
+    ao_mode = ao_modes[0]
     spaxel_scale = '60x30'
     spaxels_per_slice = 3       # How many field points per Slice to use
     pupil_sampling = 4          # N x N grid per pupil quadrant. See Zemax Operand help for RWRE

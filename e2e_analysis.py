@@ -2758,7 +2758,9 @@ class WavefrontsAnalysisMC(AnalysisFast):
 
         # Set Current Configuration
         system.MCE.SetCurrentConfiguration(config)
-        print("\nConfig: ", config)
+        if config % 20 == 0:
+            print("Config: ", config)
+
 
         # [WARNING]: for the 4x4 spaxel scale we noticed that a significant fraction of the rays get vignetted at the slicer
         # this introduces a bias in the RMS WFE calculation. To avoid this, we modify the Image Slicer aperture definition
@@ -2790,7 +2792,18 @@ class WavefrontsAnalysisMC(AnalysisFast):
         # foc_xy = np.empty((N_waves, 2))
         N_pix = int(sampling.split('x')[0])             # Get the integer value of the sampling by splitting the string
         wavefront_maps = np.zeros((N_waves, N_pix, N_pix))
-        rms_wfe = np.zeros((N_waves))
+        rms_wfe = np.zeros(N_waves)
+
+        foc_xy = np.empty((N_waves, 2))      # The Chief Ray coordinates at the Detector
+        N_rays = N_waves
+        # [2] This is where the core of the RMS WFE calculation takes place
+        # First, we begin by defining the Raytrace
+        detector_surface = system.LDE.NumberOfSurfaces - 1
+        # print(N_rays)
+        # print(detector_surface)
+        #
+        # raytrace = system.Tools.OpenBatchRayTrace()
+        # normUnPolData = raytrace.CreateNormUnpol(N_rays, constants.RaysType_Real, detector_surface)
 
         N_surfaces = system.LDE.NumberOfSurfaces
 
@@ -2802,6 +2815,9 @@ class WavefrontsAnalysisMC(AnalysisFast):
         awfe = system.Analyses.New_Analysis(constants.AnalysisIDM_WavefrontMap)
         # iterate through wavelengths
         for j, wave_idx in enumerate(wavelength_idx):
+
+            # Take advantage of the loop to simultaneously add the ray to the RayTrace
+            # normUnPolData.AddRay(wave_idx, hx, hy, 0, 0, constants.OPDMode_None)
 
             # set next wavelength
             wavelength = system.SystemData.Wavelengths.GetWavelength(wave_idx).Wavelength
@@ -2830,7 +2846,7 @@ class WavefrontsAnalysisMC(AnalysisFast):
             cresults = CastTo(results, 'IAR_')
             data = np.array(cresults.GetDataGrid(0).Values)
             # The Wavefront Map comes in waves, we should rescale it to physical units to use it later
-            wavefront_maps[j] = data * wavelength
+            wavefront_maps[j] = data * wavelength * 1e3
 
             # ptv_zos = float(cresults.HeaderData.Lines[2].split('=')[1].split(' ')[1])
             # rms_zos = float(cresults.HeaderData.Lines[2].split('=')[-1].split(' ')[1])
@@ -2845,6 +2861,26 @@ class WavefrontsAnalysisMC(AnalysisFast):
             # plt.title(r'Wave: %.3f $\mu$m, Slice #%d | RMS: %.3f $\lambda$ (%.1f nm)' % (wavelength, config, rms_wfe, rms_wfe_nm))
             # plt.colorbar()
             # plt.show()
+
+        # # Run the RayTrace
+        # CastTo(raytrace, 'ISystemTool').RunAndWaitForCompletion()
+        # normUnPolData.StartReadingResults()
+        # for j, wave_idx in enumerate(wavelength_idx):
+        #
+        #     output = normUnPolData.ReadNextResult()
+        #     if output[2] == 0:
+        #         x, y = output[4], output[5]
+        #         foc_xy[j, 0] = x
+        #         foc_xy[j, 1] = y
+        #
+        #         vignetting_code = output[3]
+        #         if vignetting_code != 0:
+        #             vignetting_surface = system.LDE.GetSurfaceAt(vignetting_code).Comment
+        #             print("\nConfig #%d" % (config))
+        #             print("Vignetting at surface #%d: %s" % (vignetting_code, vignetting_surface))
+        #
+        # normUnPolData.ClearData()
+        # CastTo(raytrace, 'ISystemTool').Close()
 
         # close analysis
         awfe.Close()
