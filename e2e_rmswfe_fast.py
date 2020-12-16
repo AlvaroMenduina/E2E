@@ -293,9 +293,9 @@ def detector_rms_wfe(zosapi, file_options, spaxels_per_slice, pupil_sampling, fi
     # Read the RMS WFE Requirement for the particular Spaxel Scale
     req = RMS_WFE[spaxel_scale]
 
-    # min_rms = 0
+    min_rms = 0
     max_rms = req
-    min_rms = np.min(rms_field)
+    # min_rms = np.min(rms_field)
     # max_rms = np.max(rms_field)
 
     # (1) DETECTOR plane plot
@@ -357,6 +357,10 @@ def detector_rms_wfe(zosapi, file_options, spaxels_per_slice, pupil_sampling, fi
     object_coord = np.array(object_coord)
 
     # (2) Stitch the Object space coordinates
+    # This is a new routine, as suggested by Fraser. How does it work
+    # First, it interpolates along each slice based on N=spaxels_per_slice values, evaluating the interpolation at
+    # 76 pixels per slice. Then, it defines a grid of 204 x 152 pixels covering the field of view in spaxels
+    # It uses the results of the along-slice interpolation to interpolate onto that grid
     for k_wave, wave_str in zip([0, N_waves // 2, -1], ['MIN', 'CENT', 'MAX']):
         data = rms_maps[:, :, k_wave].flatten()
         x_obj, y_obj = object_coord[:, :, :, 0].flatten(), object_coord[:, :, :, 1].flatten()
@@ -396,7 +400,7 @@ def detector_rms_wfe(zosapi, file_options, spaxels_per_slice, pupil_sampling, fi
         # Used 204 x 152 pixels, which is the total field of view in spaxels.
         xi, yi = np.mgrid[xmin:xmax:204j, ymin:ymax:152j]  # 204 pixels by 152 slices
         # zi = griddata((xhi[good], yhi[good]), dhi[good], (xi, yi), method='linear')  # Nearest or linear.
-        zi = griddata((xhi, yhi), dhi, (xi, yi), method='nearest')  # Nearest or linear.
+        zi = griddata(points=(xhi, yhi), values=dhi, xi=(xi, yi), method='nearest')  # Nearest or linear.
 
         fig_obj, ax = plt.subplots(1, 1)
         img = ax.imshow(zi.T, interpolation='none', cmap='jet', origin='lower left', extent=[xmin, xmax, ymin, ymax])
@@ -494,13 +498,13 @@ if __name__ == """__main__""":
     # [*] Nominal Design [*]
     # This is the bit we have to change when you run the analysis in your system
     sys_mode = 'HARMONI'
-    ao_modes = ['NOAO']
+    ao_modes = ['LTAO']
     ao_mode = 'NOAO'
-    spaxel_scale = '4x4'
+    spaxel_scale = '60x30'
     spaxels_per_slice = 3       # How many field points per Slice to use
     pupil_sampling = 4          # N x N grid per pupil quadrant. See Zemax Operand help for RWRE
-    # gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_SHORT', 'K_LONG']
-    gratings = ['H']
+    gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_SHORT', 'K_LONG']
+    # gratings = ['H']
 
     file_options = {'MONTE_CARLO': False, 'which_system': sys_mode, 'AO_modes': ao_modes,
                     'SPAX_SCALE': spaxel_scale, 'AO_MODE': ao_modes[0]}
