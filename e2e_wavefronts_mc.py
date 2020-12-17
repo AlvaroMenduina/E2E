@@ -194,8 +194,8 @@ def calculate_wavefronts(zosapi, file_options, sampling, files_path, results_pat
     if not os.path.exists(analysis_dir):
         os.mkdir(analysis_dir)
 
-    # ifu_sections = ['AB', 'CD', 'EF', 'GH']
-    ifu_sections = ['AB']
+    ifu_sections = ['AB', 'CD', 'EF', 'GH']
+    # ifu_sections = ['AB']
     analysis = e2e.WavefrontsAnalysisMC(zosapi=zosapi)      # The analysis object
 
     wavefront_maps, rms_wfes = [], []                       # We save the Maps as well as their RMS WFE
@@ -212,7 +212,7 @@ def calculate_wavefronts(zosapi, file_options, sampling, files_path, results_pat
         file_options['ISP_MC'] = isp_mc
 
         list_results = analysis.loop_over_files(files_dir=files_path, files_opt=file_options, results_path=results_path,
-                                                wavelength_idx=[1], configuration_idx=None,
+                                                wavelength_idx=[1, 12, 23], configuration_idx=None,
                                                 surface=None, sampling=sampling, remove_slicer_aperture=True)
 
         wavefront, rms_wfe, obj_xy, waves = list_results[0]  # Only 1 item on the list, no Monte Carlo files
@@ -289,7 +289,7 @@ if __name__ == """__main__""":
     N_coef = zernike_fit.zernike_matrix.shape[-1]       # How many coefficients will the fit consider
 
     # (2) Wavefront Analysis MC
-    N_files = 1
+    N_files = 30
     for k_mc in np.arange(1, N_files + 1):
 
         # Define the dictionary containing all the MC instances for the different subsystems
