@@ -2795,17 +2795,49 @@ class WavefrontsAnalysisMC(AnalysisFast):
         rms_wfe = np.zeros(N_waves)
 
         foc_xy = np.empty((N_waves, 2))      # The Chief Ray coordinates at the Detector
-        N_rays = N_waves
-        # [2] This is where the core of the RMS WFE calculation takes place
-        # First, we begin by defining the Raytrace
-        detector_surface = system.LDE.NumberOfSurfaces - 1
+        N_rays = N_waves * 5
         # print(N_rays)
-        # print(detector_surface)
-        #
-        # raytrace = system.Tools.OpenBatchRayTrace()
-        # normUnPolData = raytrace.CreateNormUnpol(N_rays, constants.RaysType_Real, detector_surface)
 
+        # First, we begin by defining the Raytrace
         N_surfaces = system.LDE.NumberOfSurfaces
+        detector_surface = N_surfaces - 1
+        raytrace = system.Tools.OpenBatchRayTrace()
+        normUnPolData = raytrace.CreateNormUnpol(N_rays, constants.RaysType_Real, detector_surface)
+        for j, wave_idx in enumerate(wavelength_idx):
+
+            # We will add 4 rays, each at one of the pupil edges because the sometimes there is vignetting
+            # but it's not flagged if the chief ray traces properly
+            p = 0.75
+            normUnPolData.AddRay(wave_idx, hx, hy, 0, p, constants.OPDMode_None)
+            normUnPolData.AddRay(wave_idx, hx, hy, 0, -p, constants.OPDMode_None)
+            normUnPolData.AddRay(wave_idx, hx, hy, p, 0, constants.OPDMode_None)
+            normUnPolData.AddRay(wave_idx, hx, hy, -p, 0, constants.OPDMode_None)
+
+            normUnPolData.AddRay(wave_idx, hx, hy, 0, 0, constants.OPDMode_None)
+
+        # Run the RayTrace
+        CastTo(raytrace, 'ISystemTool').RunAndWaitForCompletion()
+        normUnPolData.StartReadingResults()
+        index_vignetted = []
+        for j, wave_idx in enumerate(wavelength_idx):
+            for l in range(5):
+                output = normUnPolData.ReadNextResult()
+                if output[2] == 0:
+                    x, y = output[4], output[5]
+                    foc_xy[j, 0] = x
+                    foc_xy[j, 1] = y
+
+                    vignetting_code = output[3]
+                    if vignetting_code != 0:
+
+                        # add the index to a list so we can avoid the Wavefront Analysis
+                        index_vignetted.append(j)
+                        vignetting_surface = system.LDE.GetSurfaceAt(vignetting_code).Comment
+                        print("\nConfig #%d" % config)
+                        print("Vignetting at surface #%d: %s" % (vignetting_code, vignetting_surface))
+
+        normUnPolData.ClearData()
+        CastTo(raytrace, 'ISystemTool').Close()
 
         # check pupil sampling
         if sampling not in self.samps:
@@ -2845,15 +2877,18 @@ class WavefrontsAnalysisMC(AnalysisFast):
             results = awfe.GetResults()
             cresults = CastTo(results, 'IAR_')
             data = np.array(cresults.GetDataGrid(0).Values)
-            # The Wavefront Map comes in waves, we should rescale it to physical units to use it later
-            wavefront_maps[j] = data * wavelength * 1e3
 
-            # ptv_zos = float(cresults.HeaderData.Lines[2].split('=')[1].split(' ')[1])
-            # rms_zos = float(cresults.HeaderData.Lines[2].split('=')[-1].split(' ')[1])
-            # Also store the RMS WFE value so that we can get the distribution later on
-            mdata = data - np.nanmean(data)
-            rms = np.sqrt(np.nanmean(mdata * mdata))
-            rms_wfe[j] = rms * wavelength * 1e3
+            if j in index_vignetted:
+                # Some Vignetting issue in the E2E file, ignore the wavefront to avoid getting weird results
+                print("Vignetted: Ignoring Wavefront Analysis")
+                wavefront_maps[j] = np.nan
+                rms_wfe[j] = np.nan
+            else:
+                # The Wavefront Map comes in waves, we should rescale it to physical units to use it later
+                wavefront_maps[j] = data * wavelength * 1e3
+                mdata = data - np.nanmean(data)
+                rms = np.sqrt(np.nanmean(mdata * mdata))
+                rms_wfe[j] = rms * wavelength * 1e3
             # print(ptv_zos, rms_zos)
 
             # plt.figure()
@@ -2861,26 +2896,6 @@ class WavefrontsAnalysisMC(AnalysisFast):
             # plt.title(r'Wave: %.3f $\mu$m, Slice #%d | RMS: %.3f $\lambda$ (%.1f nm)' % (wavelength, config, rms_wfe, rms_wfe_nm))
             # plt.colorbar()
             # plt.show()
-
-        # # Run the RayTrace
-        # CastTo(raytrace, 'ISystemTool').RunAndWaitForCompletion()
-        # normUnPolData.StartReadingResults()
-        # for j, wave_idx in enumerate(wavelength_idx):
-        #
-        #     output = normUnPolData.ReadNextResult()
-        #     if output[2] == 0:
-        #         x, y = output[4], output[5]
-        #         foc_xy[j, 0] = x
-        #         foc_xy[j, 1] = y
-        #
-        #         vignetting_code = output[3]
-        #         if vignetting_code != 0:
-        #             vignetting_surface = system.LDE.GetSurfaceAt(vignetting_code).Comment
-        #             print("\nConfig #%d" % (config))
-        #             print("Vignetting at surface #%d: %s" % (vignetting_code, vignetting_surface))
-        #
-        # normUnPolData.ClearData()
-        # CastTo(raytrace, 'ISystemTool').Close()
 
         # close analysis
         awfe.Close()
