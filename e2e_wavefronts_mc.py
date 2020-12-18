@@ -290,7 +290,7 @@ if __name__ == """__main__""":
 
     # (2) Wavefront Analysis MC
     N_files = 30
-    for k_mc in np.arange(1, N_files + 1):
+    for k_mc in np.arange(12, N_files + 1):
 
         # Define the dictionary containing all the MC instances for the different subsystems
         mc = monte_carlo_str(k_mc)

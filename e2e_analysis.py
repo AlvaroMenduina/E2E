@@ -1931,15 +1931,15 @@ class EnsquaredEnergyFastAnalysis(AnalysisFast):
         try:
             slicer_num = list(surface_names.keys())[list(surface_names.values()).index('Image Plane')]
         except ValueError:
-            slicer_num = list(surface_names.keys())[list(surface_names.values()).index('Image plane')]
+            slicer_num = list(surface_names.keys())[list(surface_names.values()).index('IFU SRM FP')]
         slicer_surface = slicer_num
         # slicer = system.LDE.GetSurfaceAt(slicer_num)
 
         # Double check that the Image Slicer surface number is correct
         slicer = system.LDE.GetSurfaceAt(slicer_surface).Comment
-        if slicer != 'Image Plane' and slicer != 'Image plane':
-            print(slicer)
-            raise ValueError("Surface #%d is not the Image Slicer. Please check the Zemax file" % slicer_surface)
+        # if slicer != 'Image Plane' and slicer != 'Image plane':
+        #     print(slicer)
+        #     raise ValueError("Surface #%d is not the Image Slicer. Please check the Zemax file" % slicer_surface)
 
         # Get the Field Points for that configuration
         sysField = system.SystemData.Fields
@@ -1989,6 +1989,12 @@ class EnsquaredEnergyFastAnalysis(AnalysisFast):
                 slicer_xy[i_wave, j_pupil, 0] = output[4]
                 slicer_xy[i_wave, j_pupil, 1] = output[5]
                 checksum_slicer += 1
+            if output[2] == 0 and output[3] != 0:
+                vignetting_code = output[3]
+                vignetting_surface = system.LDE.GetSurfaceAt(vignetting_code).Comment
+                print("\nConfig #%d" % config)
+                print("Vignetting at surface #%d: %s" % (vignetting_code, vignetting_surface))
+
         if checksum_slicer < N_rays:
             raise ValueError('Some rays were lost before the Image Slicer')
 
