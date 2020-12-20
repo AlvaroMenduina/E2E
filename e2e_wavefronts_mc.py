@@ -360,7 +360,7 @@ if __name__ == """__main__""":
     RMS_WFE_REQUIREMENTS = {'4x4': 81, '10x10': 123, '20x20': 254, '60x30': 590}
 
     rms_mc, coef = [], []
-    N_files = 20
+    N_files = 30
     for k_mc in np.arange(1, N_files + 1):
         mc = monte_carlo_str(k_mc)
         filesufix = '_%s_SPAX-%s_SPEC-%s_MC%s' % (ao_mode, spaxel_scale, gratings[0], mc)
@@ -419,16 +419,17 @@ if __name__ == """__main__""":
     plt.figure()
     reds = cm.Reds(np.linspace(0.25, 1, N_files))
     for j in range(N_files):
-        plt.scatter(zern_coef[j, :, 5], zern_coef[j, :, 7], s=4, color=reds[j])
+        plt.scatter(zern_coef[j][ :, 5], zern_coef[j][ :, 7], s=4, color=reds[j])
     # plt.scatter(zern_coef[1, :, 5], zern_coef[1, :, 6], s=5)
-    plt.xlim([-150, 150])
-    plt.ylim([-150, 150])
+    # plt.xlim([-150, 150])
+    # plt.ylim([-150, 150])
     plt.show()
 
     import corner
 
-    samples = zern_coef[:, :, 3:8]
-    samples = samples.reshape((-1, samples.shape[-1]))
+    zc = np.concatenate([x for x in zern_coef], axis=0)
+    samples = zc[:, 3:10]
+    # samples = samples.reshape((-1, samples.shape[-1]))
     mask_err = np.linalg.norm(samples, axis=1) < 400
     samples = samples[mask_err]
     figure = corner.corner(samples)

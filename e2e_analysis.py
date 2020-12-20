@@ -147,8 +147,8 @@ def airy_and_slicer(surface, wavelength, scale_mas, PSF_window, N_window):
     print('Recalculating Airy Pattern for %.3f microns' % wavelength)
 
     # Plate scales [Px, Py] for each spaxel scale in mm / arcsec, depending on the surface
-    plate_scales = {'IS': {4.0: [125, 250], 10.0: [50, 100], 20.0: [25, 50], 60.0: [16.67, 16.67]},
-                    'DET': {4.0: [3.75, 7.5], 10.0: [1.5, 3.0], 20.0: [0.75, 1.5], 60.0: [0.5, 0.5]}}
+    plate_scales = {'IS': {4.0: [125, 250], 60.0: [16.67, 16.67]},
+                    'DET': {4.0: [3.75, 7.5], 60.0: [0.5, 0.5]}}
     plate_x = plate_scales[surface][scale_mas][0]
     plate_y = plate_scales[surface][scale_mas][1]
 
@@ -327,10 +327,13 @@ class DiffractionEffects(object):
         (x, y) = xy_data
         x0 = float(x0)
         y0 = float(y0)
-        a = (np.cos(theta) ** 2) / (2 * sigma_x ** 2) + (np.sin(theta) ** 2) / (2 * sigma_y ** 2)
-        b = -(np.sin(2 * theta)) / (4 * sigma_x ** 2) + (np.sin(2 * theta)) / (4 * sigma_y ** 2)
-        c = (np.sin(theta) ** 2) / (2 * sigma_x ** 2) + (np.cos(theta) ** 2) / (2 * sigma_y ** 2)
-        g = offset + amplitude * np.exp(-(a * ((x - x0) ** 2) + 2 * b * (x - x0) * (y - y0) + c * ((y - y0) ** 2)))
+        # a = (np.cos(theta) ** 2) / (2 * sigma_x ** 2) + (np.sin(theta) ** 2) / (2 * sigma_y ** 2)
+        # b = -(np.sin(2 * theta)) / (4 * sigma_x ** 2) + (np.sin(2 * theta)) / (4 * sigma_y ** 2)
+        # c = (np.sin(theta) ** 2) / (2 * sigma_x ** 2) + (np.cos(theta) ** 2) / (2 * sigma_y ** 2)
+
+        a = 1 / (2 * sigma_x ** 2)
+        b = 1 / (2 * sigma_y ** 2)
+        g = offset + amplitude * np.exp(-(a * ((x - x0) ** 2) + b * ((y - y0) ** 2)))
         return g
 
     def fit_psf_to_gaussian(self, xx, yy, psf_data, x0, y0, sigmax0, sigmay0):
@@ -344,7 +347,6 @@ class DiffractionEffects(object):
         :return:
         """
         peak0, offset0 = 1.0, 0.0     # Guesses
-        rotation0 = 0.0              # Guesses
         # # We guess that the FWHM will be around 2 detector pixels [30 microns]
         # # Using the formula for a Gaussian FWHM = 2 sqrt(2 ln(2)) Sigma
         # sigma_fwhm = 100e-3 / 2 * np.sqrt(2 * np.log(2))
@@ -353,8 +355,6 @@ class DiffractionEffects(object):
         guess_param = [x0, y0, sigmax0, sigmay0, peak0, offset0]
         bounds = ([-np.inf, -np.inf, 0.0, 0.0, 0, -np.inf],
                   [np.inf, np.inf, np.inf, np.inf, np.inf, np.inf])
-        # we don't let the theta vary more than +-45 degrees because that would
-        # flip the values of FWHM_X and FWHM_Y
 
         while True:
 
@@ -378,32 +378,7 @@ class DiffractionEffects(object):
                 print("Trying with new Sigmas: X %.3f & Y %.3f microns" % (1e3 * new_sigmax0, 1e3 * new_sigmay0))
                 guess_param = [x0, y0, new_sigmax0, new_sigmay0, peak0, offset0]
 
-            # if sigmaX > 0.0 and sigmaY > 0.0:  # we found a reasonable value
-            #     break
-
-        # try:
-        #     pars, cov = curve_fit(self.gaussian2d, (xx.ravel(), yy.ravel()), psf_data.ravel(),
-        #                           p0=guess_param, bounds=bounds)
-        #     # Results of the fit for the sigmaX, sigmaY and theta
-        #     sigmaX, sigmaY, theta = pars[2], pars[3], pars[4]
-        #
-        # except RuntimeError:    # If it fails to converge
-        #
-        #     # sigmaX, sigmaY, theta = np.nan, np.nan, np.nan
-        #     print("\n[WARNING] Gaussian Fit of the PSF failed!")
-        #
-        #     # try with other guesses
-        #     deltax = np.random.uniform(low=-1.0, high=1.0)
-        #     deltay = np.random.uniform(low=-1.0, high=1.0)
-        #     new_sigmax0 = (1 + deltax) * sigmax0
-        #     new_sigmay0 = (1 + deltay) * sigmay0
-        #     print("Trying with new Sigmas: X %.3f & Y %.3f microns" % (1e3 * new_sigmax0, 1e3*new_sigmay0))
-        #     self.fit_psf_to_gaussian(xx, yy, psf_data, x0, y0, new_sigmax0, new_sigmay0)
-        #     # plt.figure()
-        #     # plt.imshow(psf_data)
-        #     # plt.colorbar()
-        #     # plt.show()
-
+        # Use the formula for the Gaussian FWHM to transform the sigmas into FWHM values
         fwhm_x = 2 * np.sqrt(2 * np.log(2)) * sigmaX * 1000
         fwhm_y = 2 * np.sqrt(2 * np.log(2)) * sigmaY * 1000
 
@@ -2225,11 +2200,10 @@ class FWHM_PSF_FastAnalysis(AnalysisFast):
                                                 scale_mas=spaxel_scale, wavelength=wavelength)
         time_diffpsf = time() - start
         # print("Time to add Diffraction: %.3f sec" % time_diffpsf)
-        start = time()
 
-        # guesses = {'IS': {4.0: }}
 
         # Fit the PSF to a 2D Gaussian
+        start = time()
         guess_x = PSF_window / 2 / 1000
         fwhm_x, fwhm_y, theta = diffraction.fit_psf_to_gaussian(xx=xx_grid, yy=yy_grid, psf_data=psf_diffr,
                                                                 x0=cent_x, y0=cent_y, sigmax0=guess_x, sigmay0=guess_x)

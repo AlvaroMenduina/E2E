@@ -23,6 +23,10 @@ from matplotlib.patches import Rectangle
 import pandas as pd
 import seaborn as sns
 
+# Plate scales [Px, Py] for each spaxel scale in mm / arcsec, depending on the surface
+plate_scales = {'IS': {'4x4': [125, 250], '60x30': [16.67, 16.67]},
+                'DET': {'4x4': [3.75, 7.5], '60x30': [0.5, 0.5]}}
+
 
 def draw_detector_boundary(ax):
     """
@@ -79,8 +83,6 @@ def fwhm_psf_detector(zosapi, sys_mode, ao_modes, spaxel_scale, grating, N_confi
 
     analysis = e2e.FWHM_PSF_FastAnalysis(zosapi=zosapi)
 
-    ifu_sections = ['AB', 'CD', 'EF', 'GH']
-
     wavelength_idx = np.linspace(1, 23, N_waves).astype(int)
     # Select a subsect of configuration indices. Using all of them takes forever...
     # We jump every N_configs
@@ -93,6 +95,7 @@ def fwhm_psf_detector(zosapi, sys_mode, ao_modes, spaxel_scale, grating, N_confi
 
     fx, fy = [], []
     focal_coord, object_coord = [], []
+    ifu_sections = ['AB', 'CD', 'EF', 'GH']
     for ifu_section in ifu_sections:
         options = {'which_system': sys_mode, 'AO_modes': ao_modes, 'scales': [spaxel_scale], 'IFUs': [ifu_section],
                    'grating': [grating]}
@@ -104,6 +107,14 @@ def fwhm_psf_detector(zosapi, sys_mode, ao_modes, spaxel_scale, grating, N_confi
         focal_coord.append(foc_xy)
         object_coord.append(obj_xy)
         fwhm_x, fwhm_y = fwhm[:, :, 0], fwhm[:, :, 1]
+
+        # Convert to milli-arcseconds
+        plate_x = plate_scales['DET'][spaxel_scale][0]      # mm / arcsec
+        plate_y = plate_scales['IS'][spaxel_scale][1]
+
+        fwhm_x /= plate_x
+        fwhm_y /= plate_y
+
         fx.append(fwhm_x)
         fy.append(fwhm_y)
 
@@ -112,9 +123,12 @@ def fwhm_psf_detector(zosapi, sys_mode, ao_modes, spaxel_scale, grating, N_confi
 
     # (1) DETECTOR plane plot
     # Get a separate figure for each direction X and Y
+    spax = int(spaxel_scale.split('x')[0])
     for fwhm, label in zip([fx, fy], ['FWHM_X', 'FWHM_Y']):
-        min_fwhm = np.nanmin(fwhm)
-        max_fwhm = np.nanmax(fwhm)
+        # min_fwhm = np.nanmin(fwhm)
+        # max_fwhm = np.nanmax(fwhm)
+        min_fwhm = 0
+        max_fwhm = spax if spaxel_scale == "60x30" else 4 * spax
 
         fig, axes = plt.subplots(2, 2, figsize=(10, 10))
         # Loop over the IFU channels: AB, CD, EF, GH
@@ -153,10 +167,11 @@ def fwhm_psf_detector(zosapi, sys_mode, ao_modes, spaxel_scale, grating, N_confi
                 axis_label = 'Detector'
                 ax.set_xlabel(axis_label + r' X [mm]')
                 ax.set_ylabel(axis_label + r' Y [mm]')
-                ax.scatter(_foc_xy[:, :, 0].flatten(), _foc_xy[:, :, 1].flatten(), s=2, color='black')
+                # ax.scatter(_foc_xy[:, :, 0].flatten(), _foc_xy[:, :, 1].flatten(), s=2, color='black')
                 ax.set_aspect('equal')
                 cbar = plt.colorbar(tpc_odd, ax=ax, orientation='horizontal')
-                cbar.ax.set_xlabel('[$\mu$m]')
+                # cbar.ax.set_xlabel('[$\mu$m]')
+                cbar.ax.set_xlabel('[mas]')
                 title = r'%s IFU-%s | %s | %s | %s' % (label, ifu_section, spaxel_scale, grating, ao_modes[0])
                 ax.set_title(title)
 
@@ -255,8 +270,8 @@ def fwhm_all_gratings(zosapi, sys_mode, ao_modes, spaxel_scale, grating_list, N_
         min_x, min_y = np.nanmin(fx), np.nanmin(fy)
         mean_x, mean_y = np.nanmean(fx), np.nanmean(fy)
         max_x, max_y = np.nanmax(fx), np.nanmax(fy)
-        print("Along Slice X  | Min: %.2f microns, Max: %.2f microns" % (min_x, max_x))
-        print("Across Slice Y | Min: %.2f microns, Max: %.2f microns" % (min_y, max_y))
+        print("Along Slice X  | Min: %.2f mas, Max: %.2f mas" % (min_x, max_x))
+        print("Across Slice Y | Min: %.2f mas, Max: %.2f mas" % (min_y, max_y))
         minX.append(min_x)
         meanX.append(mean_x)
         maxX.append(max_x)
@@ -271,14 +286,32 @@ def fwhm_all_gratings(zosapi, sys_mode, ao_modes, spaxel_scale, grating_list, N_
     data_x = pd.DataFrame(fx_grating, columns=grating_list)
     data_y = pd.DataFrame(fy_grating, columns=grating_list)
 
+    # to show lines at fractions of spaxels we need the numerical value
+    spax = int(spaxel_scale.split('x')[0])
+
+    def add_spax_line(axis):
+        if spaxel_scale == "60x30":
+            axis.axhline(y=spax, color='black')
+            axis.axhline(y=spax / 2, color='black', linestyle='--')
+        elif spaxel_scale == "4x4":
+            axis.axhline(y=2*spax, color='black')
+            axis.axhline(y=spax, color='black', linestyle='--')
+
+
     # Box plot, showing the main characteristics of the distribution (median, Q1, Q3, inter-quartile range...)
     fig_box, (ax1, ax2) = plt.subplots(2, 1, figsize=(16, 8))
     sns.boxplot(data=data_x, ax=ax1, hue_order=grating_list, palette=sns.color_palette("Blues"))
     sns.boxplot(data=data_y, ax=ax2, hue_order=grating_list, palette=sns.color_palette("Reds"))
     ax1.set_title('FWHM Along Slice [X] Detector Plane | %s scale | %s %s' % (spaxel_scale, sys_mode, ao_modes[0]))
     ax2.set_title('FWHM Across Slice [Y] Image Slicer | %s scale | %s %s' % (spaxel_scale, sys_mode, ao_modes[0]))
-    ax1.set_ylabel('FWHM [$\mu$m]')
-    ax2.set_ylabel('FWHM [$\mu$m]')
+    add_spax_line(ax1)
+    add_spax_line(ax2)
+    # ax1.set_ylabel('FWHM [$\mu$m]')
+    # ax2.set_ylabel('FWHM [$\mu$m]')
+    ax1.set_ylabel('FWHM [mas]')
+    ax2.set_ylabel('FWHM [mas]')
+    ax1.set_ylim(bottom=0)
+    ax2.set_ylim(bottom=0)
 
     fig_name = "FWHM_PSF_%s_MODE_%s_%s" % (spaxel_scale, sys_mode, ao_modes[0])
     if os.path.isfile(os.path.join(analysis_dir, fig_name)):
@@ -289,10 +322,19 @@ def fwhm_all_gratings(zosapi, sys_mode, ao_modes, spaxel_scale, grating_list, N_
     fig_violin, (ax1, ax2) = plt.subplots(2, 1, figsize=(16, 8))
     sns.violinplot(data=data_x, ax=ax1, hue_order=grating_list, palette=sns.color_palette("Blues"))
     sns.violinplot(data=data_y, ax=ax2, hue_order=grating_list, palette=sns.color_palette("Reds"))
+    ax1.axhline(y=spax, color='black')
+    ax1.axhline(y=spax/2, color='black', linestyle='--')
+    add_spax_line(ax1)
+    add_spax_line(ax2)
+
     ax1.set_title('FWHM Along Slice [X] Detector Plane | %s scale | %s %s' % (spaxel_scale, sys_mode, ao_modes[0]))
     ax2.set_title('FWHM Across Slice [Y] Image Slicer | %s scale | %s %s' % (spaxel_scale, sys_mode, ao_modes[0]))
-    ax1.set_ylabel('FWHM [$\mu$m]')
-    ax2.set_ylabel('FWHM [$\mu$m]')
+    # ax1.set_ylabel('FWHM [$\mu$m]')
+    # ax2.set_ylabel('FWHM [$\mu$m]')
+    ax1.set_ylabel('FWHM [mas]')
+    ax2.set_ylabel('FWHM [mas]')
+    ax1.set_ylim(bottom=0)
+    ax2.set_ylim(bottom=0)
 
     fig_name = "FWHM_PSF_%s_MODE_%s_%s_violin" % (spaxel_scale, sys_mode, ao_modes[0])
     if os.path.isfile(os.path.join(analysis_dir, fig_name)):
@@ -314,10 +356,10 @@ if __name__ == """__main__""":
 
     # [*] This is the bit we have to change when you run the analysis in your system [*]
     sys_mode = 'HARMONI'
-    ao_modes = ['NOAO']
+    ao_modes = ['LTAO']
     spaxel_scale = '60x30'
-    # gratings = ['VIS', 'IZ', 'J', 'IZJ', 'Z_HIGH', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
-    gratings = ['H']
+    gratings = ['VIS', 'IZ', 'J', 'IZJ', 'Z_HIGH', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
+    # gratings = ['H', 'HK']
     N_rays = 500    # how many rays to trace to estimate the geometric PSF
     N_waves = 5     # how many Wavelengths to analyse
     N_configs = 2   # Jump every N_configs, not the total number
@@ -330,5 +372,32 @@ if __name__ == """__main__""":
                                       spaxel_scale=spaxel_scale, grating_list=gratings,
                                       N_configs=N_configs, N_waves=N_waves, N_rays=N_rays,
                                       files_path=files_path, results_path=results_path)
+
+    # We will create a separate folder within results_path to save the FWHM results
+    analysis_dir = os.path.join(results_path, 'FWHM')
+    print("Analysis Results will be saved in folder: ", analysis_dir)
+    if not os.path.exists(analysis_dir):
+        os.mkdir(analysis_dir)
+
+    # We will save the results in a .txt file
+    for fwhm_data, label in zip([fx, fy], ['X', 'Y']):
+        file_name = 'FWHM_%s_%s_%s_Percentiles.txt' % (label, ao_modes[0], spaxel_scale)
+        with open(os.path.join(analysis_dir, file_name), 'w') as f:
+            f.write('AO: %s, Spaxel Scale: %s\n' % (ao_modes[0], spaxel_scale))
+            f.write('Rays traced for the PSF: %d\n' % N_rays)
+            f.write('Direction: %s \n' % label)
+            f.write('Gratings: ')
+            f.write(str(gratings))
+            f.write('\nFWHM Percentiles | Units [mas]:\n')
+            f.write('\nBand, 5th-ile, mean, median, 95th-ile')
+            for k in range(len(gratings)):
+                grating = gratings[k]
+                data = fwhm_data[:, k]
+                mean = np.mean(data)
+                median = np.median(data)
+                low_pctile = np.percentile(data, 5)
+                high_pctile = np.percentile(data, 95)
+                f.write("\n%s band, %.2f, %.2f, %.2f, %.2f" %
+                        (grating, low_pctile, mean, median, high_pctile))
 
     # plt.show()

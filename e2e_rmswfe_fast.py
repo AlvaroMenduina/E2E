@@ -498,7 +498,7 @@ if __name__ == """__main__""":
     # [*] Nominal Design [*]
     # This is the bit we have to change when you run the analysis in your system
     sys_mode = 'HARMONI'
-    ao_modes = ['LTAO']
+    ao_modes = ['SCAO']
     ao_mode = ao_modes[0]
     spaxel_scale = '60x30'
     spaxels_per_slice = 3       # How many field points per Slice to use
@@ -550,6 +550,7 @@ if __name__ == """__main__""":
         f.write('Gratings: ')
         f.write(str(gratings))
         f.write('\nRMS WFE Percentiles:\n')
+        f.write('\nBand, 5th-ile, mean, median, 95th-ile')
         for k in range(len(gratings)):
             grating = gratings[k]
             rms_data = rms_grating[:, k]
@@ -557,7 +558,7 @@ if __name__ == """__main__""":
             median = np.median(rms_data)
             low_pctile = np.percentile(rms_data, 5)
             high_pctile = np.percentile(rms_data, 95)
-            f.write("\n%s band: 5th = %.2f nm | mean = %.2f nm, median = %.2f nm | 95th = %.2f nm" %
+            f.write("\n%s band, %.2f, %.2f, %.2f, %.2f" %
                     (grating, low_pctile, mean, median, high_pctile))
 
     # Finally, we show the performance across all gratings with the Violin and Boxplots
