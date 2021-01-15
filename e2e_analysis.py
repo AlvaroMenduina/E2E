@@ -2168,7 +2168,7 @@ class FWHM_PSF_FastAnalysis(AnalysisFast):
 
     """
 
-    def calculate_fwhm(self, surface, xy_data, PSF_window, N_points, spaxel_scale, wavelength):
+    def calculate_fwhm(self, surface, xy_data, PSF_window, N_points, spaxel_scale, wavelength, mode='diffraction'):
 
         start = time()
         # Calculate the Geometric PSF
@@ -2177,7 +2177,7 @@ class FWHM_PSF_FastAnalysis(AnalysisFast):
 
         std_x, std_y = np.std(x), np.std(y)
         bandwidth = min(std_x, std_y)
-        kde = KernelDensity(kernel='gaussian', bandwidth=bandwidth).fit(xy_data)
+        kde = KernelDensity(kernel='gaussian', bandwidth=1.0*bandwidth).fit(xy_data)
 
         # define a grid to compute the PSF
         xmin, xmax = cent_x - PSF_window/2/1000, cent_x + PSF_window/2/1000
@@ -2194,19 +2194,26 @@ class FWHM_PSF_FastAnalysis(AnalysisFast):
 
         time_geopsf = time() - start
         # print("Time to estimate GeoPSF: %.3f sec" % time_geo)
-        start = time()
 
-        psf_diffr = diffraction.add_diffraction(surface=surface, psf_geo=psf_geo, PSF_window=PSF_window,
-                                                scale_mas=spaxel_scale, wavelength=wavelength)
-        time_diffpsf = time() - start
-        # print("Time to add Diffraction: %.3f sec" % time_diffpsf)
+        if mode == "diffraction":
+            start = time()
 
+            psf_diffr = diffraction.add_diffraction(surface=surface, psf_geo=psf_geo, PSF_window=PSF_window,
+                                                    scale_mas=spaxel_scale, wavelength=wavelength)
+            time_diffpsf = time() - start
+            # print("Time to add Diffraction: %.3f sec" % time_diffpsf)
 
-        # Fit the PSF to a 2D Gaussian
-        start = time()
-        guess_x = PSF_window / 2 / 1000
-        fwhm_x, fwhm_y, theta = diffraction.fit_psf_to_gaussian(xx=xx_grid, yy=yy_grid, psf_data=psf_diffr,
-                                                                x0=cent_x, y0=cent_y, sigmax0=guess_x, sigmay0=guess_x)
+            # Fit the PSF to a 2D Gaussian
+            start = time()
+            guess_x = PSF_window / 2 / 1000
+            fwhm_x, fwhm_y, theta = diffraction.fit_psf_to_gaussian(xx=xx_grid, yy=yy_grid, psf_data=psf_diffr,
+                                                                    x0=cent_x, y0=cent_y, sigmax0=guess_x, sigmay0=guess_x)
+        elif mode == "geometric":
+
+            start = time()
+            guess_x = PSF_window / 2 / 1000
+            fwhm_x, fwhm_y, theta = diffraction.fit_psf_to_gaussian(xx=xx_grid, yy=yy_grid, psf_data=psf_geo,
+                                                                    x0=cent_x, y0=cent_y, sigmax0=guess_x, sigmay0=guess_x)
 
         time_gauss = time() - start
 
@@ -2233,7 +2240,7 @@ class FWHM_PSF_FastAnalysis(AnalysisFast):
 
         return fwhm_x, fwhm_y
 
-    def analysis_function_fwhm_psf(self, system, wavelength_idx, surface, config, px, py, spaxel_scale, N_points):
+    def analysis_function_fwhm_psf(self, system, wavelength_idx, surface, config, px, py, spaxel_scale, N_points, mode):
 
         start0 = time()
         # Set Current Configuration
@@ -2378,12 +2385,12 @@ class FWHM_PSF_FastAnalysis(AnalysisFast):
             wavelength = system.SystemData.Wavelengths.GetWavelength(wave_idx).Wavelength
             fwhm_x_slicer, fwhm_y_slicer = self.calculate_fwhm(surface='IS', xy_data=xy_data_slicer, PSF_window=win_slicer,
                                                                N_points=N_points, spaxel_scale=spaxel_scale,
-                                                               wavelength=wavelength)
+                                                               wavelength=wavelength, mode=mode)
 
             xy_data_detector = detector_xy[i_wave]
             fwhm_x_det, fwhm_y_det = self.calculate_fwhm(surface='DET', xy_data=xy_data_detector, PSF_window=win_detect,
                                                          N_points=N_points, spaxel_scale=spaxel_scale,
-                                                         wavelength=wavelength)
+                                                         wavelength=wavelength, mode=mode)
 
             # plt.show()
 
@@ -2401,7 +2408,7 @@ class FWHM_PSF_FastAnalysis(AnalysisFast):
 
 
     def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
-                        configuration_idx=None, N_rays=500, N_points=50):
+                        configuration_idx=None, N_rays=500, N_points=50, mode='diffraction'):
         """
 
         """
@@ -2432,7 +2439,7 @@ class FWHM_PSF_FastAnalysis(AnalysisFast):
                                              files_dir=files_dir, zemax_file=zemax_file, results_path=results_path,
                                              results_shapes=results_shapes, results_names=results_names,
                                              wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
-                                             px=px, py=py, spaxel_scale=spaxel_scale, N_points=N_points)
+                                             px=px, py=py, spaxel_scale=spaxel_scale, N_points=N_points, mode=mode)
             results.append(list_results)
 
         return results
@@ -2947,7 +2954,7 @@ class PSFDynamic(AnalysisFast):
 
         std_x, std_y = np.std(x), np.std(y)
         bandwidth = min(std_x, std_y)
-        kde = KernelDensity(kernel='gaussian', bandwidth=bandwidth).fit(xy_data)
+        kde = KernelDensity(kernel='gaussian', bandwidth=0.75*bandwidth).fit(xy_data)
 
         # define a grid to compute the PSF
         xmin, xmax = cent_x - PSF_window/2/1000, cent_x + PSF_window/2/1000

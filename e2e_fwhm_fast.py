@@ -51,7 +51,7 @@ def draw_detector_boundary(ax):
     return
 
 
-def fwhm_psf_detector(zosapi, sys_mode, ao_modes, spaxel_scale, grating, N_configs, N_waves, N_rays, files_path, results_path):
+def fwhm_psf_detector(zosapi, sys_mode, ao_modes, spaxel_scale, grating, N_configs, N_waves, N_rays, mode, files_path, results_path):
     """
     Calculate the FWHM PSF (including diffraction effects)
     in both directions, acrosss and along the Slices
@@ -70,6 +70,7 @@ def fwhm_psf_detector(zosapi, sys_mode, ao_modes, spaxel_scale, grating, N_confi
     :param grating: [str] the spectral band to analyze, ex. 'HK'
     :param N_waves: how many wavelengths to use. If 3, we will use the min, central and max (typically 5-7)
     :param N_rays: how many pupil rays to trace to estimate the geometric PSF
+    :param mode: whether to use 'geometric' or 'diffraction' PSF for the FWHM calculation
     :param files_path: path to the E2E files to load for the analysis
     :param results_path: path to save the results
     :return:
@@ -100,7 +101,8 @@ def fwhm_psf_detector(zosapi, sys_mode, ao_modes, spaxel_scale, grating, N_confi
         options = {'which_system': sys_mode, 'AO_modes': ao_modes, 'scales': [spaxel_scale], 'IFUs': [ifu_section],
                    'grating': [grating]}
         list_results = analysis.loop_over_files(files_dir=files_path, files_opt=options, results_path=results_path,
-                                                wavelength_idx=wavelength_idx, configuration_idx=configs, N_rays=N_rays)
+                                                wavelength_idx=wavelength_idx, configuration_idx=configs, N_rays=N_rays,
+                                                mode=mode)
 
         # Only 1 list, no Monte Carlo
         fwhm, obj_xy, foc_xy, wavelengths = list_results[0]
@@ -114,6 +116,8 @@ def fwhm_psf_detector(zosapi, sys_mode, ao_modes, spaxel_scale, grating, N_confi
 
         fwhm_x /= plate_x
         fwhm_y /= plate_y
+
+        print("IFU-%s: %.1f mas" % (ifu_section, np.mean(fwhm_y)))
 
         fx.append(fwhm_x)
         fy.append(fwhm_y)
@@ -175,7 +179,7 @@ def fwhm_psf_detector(zosapi, sys_mode, ao_modes, spaxel_scale, grating, N_confi
                 title = r'%s IFU-%s | %s | %s | %s' % (label, ifu_section, spaxel_scale, grating, ao_modes[0])
                 ax.set_title(title)
 
-        fig_name = "%s_%s_DETECTOR_SPEC_%s_MODE_%s_%s" % (label, spaxel_scale, grating, sys_mode, ao_modes[0])
+        fig_name = "%s_%s_%s_DETECTOR_SPEC_%s_MODE_%s_%s" % (label, mode, spaxel_scale, grating, sys_mode, ao_modes[0])
 
         save_path = os.path.join(results_path, analysis_dir)
         if os.path.isfile(os.path.join(save_path, fig_name)):
@@ -222,7 +226,7 @@ def fwhm_psf_detector(zosapi, sys_mode, ao_modes, spaxel_scale, grating, N_confi
     return fx, fy
 
 
-def fwhm_all_gratings(zosapi, sys_mode, ao_modes, spaxel_scale, grating_list, N_configs, N_waves, N_rays,
+def fwhm_all_gratings(zosapi, sys_mode, ao_modes, spaxel_scale, grating_list, N_configs, N_waves, N_rays, mode,
                       files_path, results_path):
     """
     Run the FWHM PSF analysis across all spectral bands
@@ -237,6 +241,7 @@ def fwhm_all_gratings(zosapi, sys_mode, ao_modes, spaxel_scale, grating_list, N_
     :param N_configs: how many configurations to skip (N_configs = 2, we jump every 2 configurations)
     :param N_waves: how many wavelengths to analyse (typically 5 - 7)
     :param N_rays: how many rays to trace to estimate the geometric PSF (typically 500 - 100)
+    :param mode: whether to use 'geometric' or 'diffraction' PSF for the calculation
     :param files_path: path to the Zemax files
     :param results_path: path where the results will be stored
     :return:
@@ -258,7 +263,7 @@ def fwhm_all_gratings(zosapi, sys_mode, ao_modes, spaxel_scale, grating_list, N_
     for grating in grating_list:
 
         fx, fy = fwhm_psf_detector(zosapi=zosapi, sys_mode=sys_mode, ao_modes=ao_modes, spaxel_scale=spaxel_scale,
-                                   grating=grating, N_configs=N_configs, N_waves=N_waves, N_rays=N_rays,
+                                   grating=grating, N_configs=N_configs, N_waves=N_waves, N_rays=N_rays, mode=mode,
                                    files_path=files_path, results_path=results_path)
 
         fx_grating.append(fx.flatten())
@@ -266,7 +271,7 @@ def fwhm_all_gratings(zosapi, sys_mode, ao_modes, spaxel_scale, grating_list, N_
 
         # Print some information as we go, to make sure the results look reasonable
         print("\nFor Spectral band %s" % grating)
-        print("FWHM PSF results: ")
+        print("FWHM PSF results [%s]: " % (mode))
         min_x, min_y = np.nanmin(fx), np.nanmin(fy)
         mean_x, mean_y = np.nanmean(fx), np.nanmean(fy)
         max_x, max_y = np.nanmax(fx), np.nanmax(fy)
@@ -313,7 +318,7 @@ def fwhm_all_gratings(zosapi, sys_mode, ao_modes, spaxel_scale, grating_list, N_
     ax1.set_ylim(bottom=0)
     ax2.set_ylim(bottom=0)
 
-    fig_name = "FWHM_PSF_%s_MODE_%s_%s" % (spaxel_scale, sys_mode, ao_modes[0])
+    fig_name = "FWHM_%s_PSF_%s_MODE_%s_%s" % (mode, spaxel_scale, sys_mode, ao_modes[0])
     if os.path.isfile(os.path.join(analysis_dir, fig_name)):
         os.remove(os.path.join(analysis_dir, fig_name))
     fig_box.savefig(os.path.join(analysis_dir, fig_name))
@@ -322,8 +327,6 @@ def fwhm_all_gratings(zosapi, sys_mode, ao_modes, spaxel_scale, grating_list, N_
     fig_violin, (ax1, ax2) = plt.subplots(2, 1, figsize=(16, 8))
     sns.violinplot(data=data_x, ax=ax1, hue_order=grating_list, palette=sns.color_palette("Blues"))
     sns.violinplot(data=data_y, ax=ax2, hue_order=grating_list, palette=sns.color_palette("Reds"))
-    ax1.axhline(y=spax, color='black')
-    ax1.axhline(y=spax/2, color='black', linestyle='--')
     add_spax_line(ax1)
     add_spax_line(ax2)
 
@@ -336,7 +339,7 @@ def fwhm_all_gratings(zosapi, sys_mode, ao_modes, spaxel_scale, grating_list, N_
     ax1.set_ylim(bottom=0)
     ax2.set_ylim(bottom=0)
 
-    fig_name = "FWHM_PSF_%s_MODE_%s_%s_violin" % (spaxel_scale, sys_mode, ao_modes[0])
+    fig_name = "FWHM_%s_PSF_%s_MODE_%s_%s_violin" % (mode, spaxel_scale, sys_mode, ao_modes[0])
     if os.path.isfile(os.path.join(analysis_dir, fig_name)):
         os.remove(os.path.join(analysis_dir, fig_name))
     fig_violin.savefig(os.path.join(analysis_dir, fig_name))
@@ -356,13 +359,14 @@ if __name__ == """__main__""":
 
     # [*] This is the bit we have to change when you run the analysis in your system [*]
     sys_mode = 'HARMONI'
-    ao_modes = ['LTAO']
+    ao_modes = ['NOAO']
     spaxel_scale = '60x30'
-    gratings = ['VIS', 'IZ', 'J', 'IZJ', 'Z_HIGH', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
-    # gratings = ['H', 'HK']
-    N_rays = 500    # how many rays to trace to estimate the geometric PSF
+    # gratings = ['VIS', 'IZ', 'J', 'IZJ', 'Z_HIGH', 'H', 'H_HIGH', 'HK', 'K', 'K_LONG', 'K_SHORT']
+    gratings = ['H', 'HK']
+    N_rays = 1000    # how many rays to trace to estimate the geometric PSF
     N_waves = 5     # how many Wavelengths to analyse
     N_configs = 2   # Jump every N_configs, not the total number
+    mode = 'geometric'      # Use the geometric PSF for the FWHM
 
     files_path = os.path.abspath("D:\End to End Model\August_2020")
     results_path = os.path.abspath("D:\End to End Model\Results_ReportAugust\Mode_%s\Scale_%s" % (ao_modes[0], spaxel_scale))
@@ -371,7 +375,7 @@ if __name__ == """__main__""":
     fx, fy, stats = fwhm_all_gratings(zosapi=psa, sys_mode=sys_mode, ao_modes=ao_modes,
                                       spaxel_scale=spaxel_scale, grating_list=gratings,
                                       N_configs=N_configs, N_waves=N_waves, N_rays=N_rays,
-                                      files_path=files_path, results_path=results_path)
+                                      files_path=files_path, results_path=results_path, mode=mode)
 
     # We will create a separate folder within results_path to save the FWHM results
     analysis_dir = os.path.join(results_path, 'FWHM')
