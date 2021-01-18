@@ -169,7 +169,7 @@ class ZernikeFit(object):
         return x_fit
 
 
-def calculate_wavefronts(zosapi, file_options, sampling, files_path, results_path):
+def calculate_wavefronts(zosapi, file_options, sampling, correction, files_path, results_path):
     """
     Funtion that takes care of calculating the Wavefront Maps for all IFU paths
     of a given E2E MC model
@@ -194,8 +194,8 @@ def calculate_wavefronts(zosapi, file_options, sampling, files_path, results_pat
     if not os.path.exists(analysis_dir):
         os.mkdir(analysis_dir)
 
-    ifu_sections = ['AB', 'CD', 'EF', 'GH']
-    # ifu_sections = ['AB']
+    # ifu_sections = ['AB', 'CD', 'EF', 'GH']
+    ifu_sections = ['AB']
     analysis = e2e.WavefrontsAnalysisMC(zosapi=zosapi)      # The analysis object
 
     wavefront_maps, rms_wfes = [], []                       # We save the Maps as well as their RMS WFE
@@ -211,9 +211,12 @@ def calculate_wavefronts(zosapi, file_options, sampling, files_path, results_pat
         isp_mc = file_options['IFU_ISP_MC'][ifu_section]
         file_options['ISP_MC'] = isp_mc
 
+        wavelength_idx = [12]
+
         list_results = analysis.loop_over_files(files_dir=files_path, files_opt=file_options, results_path=results_path,
-                                                wavelength_idx=[1, 12, 23], configuration_idx=None,
-                                                surface=None, sampling=sampling, remove_slicer_aperture=True)
+                                                wavelength_idx=wavelength_idx, configuration_idx=None,
+                                                surface=None, sampling=sampling, remove_slicer_aperture=True,
+                                                correction=correction)
 
         wavefront, rms_wfe, obj_xy, waves = list_results[0]  # Only 1 item on the list, no Monte Carlo files
         wavefront_maps.append(wavefront)
@@ -267,10 +270,11 @@ if __name__ == """__main__""":
 
     # [*] Monte Carlo Instances [*]
     ao_mode = 'NOAO'
-    spaxel_scale = '4x4'
+    spaxel_scale = '60x30'
     sampling = 64
     # gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_SHORT', 'K_LONG']
     gratings = ['H']
+    correction = True       # Whether to precompensate the Zernike Coefficients at the entrance
 
     files_path = os.path.abspath("D:/End to End Model/Monte_Carlo_Dec/ManyMC")
     results_path = os.path.abspath("D:/End to End Model/Monte_Carlo_Dec/ManyMC/Results/Mode_%s/Scale_%s" % (ao_mode, spaxel_scale))
@@ -283,14 +287,14 @@ if __name__ == """__main__""":
         os.mkdir(analysis_dir)
 
     # (1) Zernike Polynomial fit parameters
-    N_levels = 12           # How many levels of the Zernike pyramid, aka radial orders
+    N_levels = 10           # How many levels of the Zernike pyramid, aka radial orders
     zernike_fit = ZernikeFit(N_PIX=sampling, N_levels=N_levels)
     pupil_mask = zernike_fit.pupil_mask
     N_coef = zernike_fit.zernike_matrix.shape[-1]       # How many coefficients will the fit consider
 
     # (2) Wavefront Analysis MC
-    N_files = 30
-    for k_mc in np.arange(12, N_files + 1):
+    N_files = 1
+    for k_mc in np.arange(1, N_files + 1):
 
         # Define the dictionary containing all the MC instances for the different subsystems
         mc = monte_carlo_str(k_mc)
@@ -306,7 +310,7 @@ if __name__ == """__main__""":
 
         # Run the Analysis for a given set of E2E-IFU files
         wavefronts, rms_wfe, waves = calculate_wavefronts(zosapi=psa, file_options=file_options, files_path=files_path,
-                                                          results_path=results_path, sampling=sampling)
+                                                          results_path=results_path, sampling=sampling, correction=correction)
         # wavefronts here are of shape [N_IFU, N_config, N_waves, N_pix, N_pix]
 
         # Show a compound image of 8 x 9 = 72 wavefront maps, one for each configuration

@@ -2741,19 +2741,62 @@ class WavefrontsAnalysisMC(AnalysisFast):
                      '8192x8192': constants.SampleSizes_S_8192x8192,
                      '16384x16384': constants.SampleSizes_S_16384x16384}
 
-    def analysis_function_wavefronts(self, system, wavelength_idx, config, surface, sampling, remove_slicer=False):
+    def analysis_function_wavefronts(self, system, wavelength_idx, config, surface, sampling, remove_slicer=False,
+                                     correction=False):
 
         # Set Current Configuration
         system.MCE.SetCurrentConfiguration(config)
         if config % 20 == 0:
             print("Config: ", config)
 
-
         # [WARNING]: for the 4x4 spaxel scale we noticed that a significant fraction of the rays get vignetted at the slicer
         # this introduces a bias in the RMS WFE calculation. To avoid this, we modify the Image Slicer aperture definition
         # so that all rays get through.
         if remove_slicer is True:
             expand_slicer_aperture(system)
+
+        # If Correction, we apply a Zernike correction at the entrance of the instrument
+        if correction is True:
+
+            # We only do this once since it applies to all configurations
+            if config == 1:
+                print("Adding Zernike Correction at the entrance")
+                # Some Parameters
+                sample = 2  # (2) is 64x64
+                field = 2   # centre of the slice
+                ztype = 1  # (1) is Standard, (0) for Fringe
+                epsilon = 0     # obscuration ratio, only for annular
+                vertex = 0      # if (0) we refer to the chief ray
+                # we use whatever wavelength defined as "central" in the analysis
+                pwave = wavelength_idx[len(wavelength_idx) // 2]
+
+                # Zernike Standard Coefficients - Using the Merit Function Operand ZERN
+                theMFE = system.MFE
+                nops = theMFE.NumberOfOperands
+                theMFE.RemoveOperandsAt(1, nops)
+
+                N_terms = 10
+                zern_standard = np.zeros(N_terms)
+                for j in range(N_terms):
+                    term = j + 1
+                    coef = theMFE.GetOperandValue(constants.MeritOperandType_ZERN, term, pwave, sample, field, ztype,
+                                                  epsilon, vertex, 0)
+                    zern_standard[j] = coef
+                    # print(coef)
+
+                # now that we know the Zernike coefficients, let's apply the correction at the entrance
+                zernike_phase = system.LDE.GetSurfaceAt(1)
+                # print("Zernike: ", zernike_phase.TypeName)
+                # Expand the number of terms
+                zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par13).IntegerValue = N_terms
+
+                # Zernike Coefficients start at Column Paramater 15
+                # zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par15).DoubleValue = 1.5 / 2 * defocus_pv
+
+                # We Skip the Piston / Tilts
+                zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par18).DoubleValue = -0.5*zern_standard[3]
+                zernike_phase.GetSurfaceCell(constants.SurfaceColumn_Par19).DoubleValue = -0.5*zern_standard[4]
+
 
         # Get the Field Points for that configuration
         sysField = system.SystemData.Fields
@@ -2830,6 +2873,7 @@ class WavefrontsAnalysisMC(AnalysisFast):
         if sampling not in self.samps:
             ValueError('sampling must be one of the following: ' + ', '.join(self.samps.keys()))
 
+        print("Wavefront Map Analysis")
         # open Wavefront Map analysis
         awfe = system.Analyses.New_Analysis(constants.AnalysisIDM_WavefrontMap)
         # iterate through wavelengths
@@ -2890,7 +2934,8 @@ class WavefrontsAnalysisMC(AnalysisFast):
         return [wavefront_maps, rms_wfe, obj_xy]
 
     def loop_over_files(self, files_dir, files_opt, results_path, wavelength_idx=None,
-                        configuration_idx=None, surface=None, sampling=1024, remove_slicer_aperture=True):
+                        configuration_idx=None, surface=None, sampling=1024, remove_slicer_aperture=True,
+                        correction=False):
 
         results_names = ['WAVEFRONT', 'RMS_WFE', 'OBJ_XY']
 
@@ -2927,7 +2972,8 @@ class WavefrontsAnalysisMC(AnalysisFast):
                                              files_dir=files_dir, zemax_file=zemax_file, results_path=results_path,
                                              results_shapes=results_shapes, results_names=results_names,
                                              wavelength_idx=wavelength_idx, configuration_idx=configuration_idx,
-                                             surface=surface, sampling=sampling_str, remove_slicer=remove_slicer_aperture)
+                                             surface=surface, sampling=sampling_str, remove_slicer=remove_slicer_aperture,
+                                             correction=correction)
 
             results.append(list_results)
 
