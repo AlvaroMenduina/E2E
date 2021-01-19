@@ -24,6 +24,7 @@ We then fit those sample wavefront to Zernike Polynomials
 import os
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 import e2e_analysis as e2e
 import zernike as zern
 import pandas as pd
@@ -194,8 +195,8 @@ def calculate_wavefronts(zosapi, file_options, sampling, correction, files_path,
     if not os.path.exists(analysis_dir):
         os.mkdir(analysis_dir)
 
-    # ifu_sections = ['AB', 'CD', 'EF', 'GH']
-    ifu_sections = ['AB']
+    ifu_sections = ['AB', 'CD', 'EF', 'GH']
+    # ifu_sections = ['AB']
     analysis = e2e.WavefrontsAnalysisMC(zosapi=zosapi)      # The analysis object
 
     wavefront_maps, rms_wfes = [], []                       # We save the Maps as well as their RMS WFE
@@ -274,7 +275,7 @@ if __name__ == """__main__""":
     sampling = 64
     # gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_SHORT', 'K_LONG']
     gratings = ['H']
-    correction = True       # Whether to precompensate the Zernike Coefficients at the entrance
+    correction = False       # Whether to precompensate the Zernike Coefficients at the entrance
 
     files_path = os.path.abspath("D:/End to End Model/Monte_Carlo_Dec/ManyMC")
     results_path = os.path.abspath("D:/End to End Model/Monte_Carlo_Dec/ManyMC/Results/Mode_%s/Scale_%s" % (ao_mode, spaxel_scale))
@@ -293,8 +294,8 @@ if __name__ == """__main__""":
     N_coef = zernike_fit.zernike_matrix.shape[-1]       # How many coefficients will the fit consider
 
     # (2) Wavefront Analysis MC
-    N_files = 1
-    for k_mc in np.arange(1, N_files + 1):
+    N_files = 28
+    for k_mc in np.arange(18, N_files + 1):
 
         # Define the dictionary containing all the MC instances for the different subsystems
         mc = monte_carlo_str(k_mc)
@@ -353,6 +354,7 @@ if __name__ == """__main__""":
             zern_coef[k] = zernike_fit.fit_wavefront(wave_data[k])
         np.save(os.path.join(analysis_dir, 'ZERN_COEF_MC' + filesufix), zern_coef)
 
+    plt.show()
     # ================================================================================================================ #
     #                                 MC Performance Analysis
     # ================================================================================================================ #
@@ -364,7 +366,7 @@ if __name__ == """__main__""":
     RMS_WFE_REQUIREMENTS = {'4x4': 81, '10x10': 123, '20x20': 254, '60x30': 590}
 
     rms_mc, coef = [], []
-    N_files = 30
+    N_files = 10
     for k_mc in np.arange(1, N_files + 1):
         mc = monte_carlo_str(k_mc)
         filesufix = '_%s_SPAX-%s_SPEC-%s_MC%s' % (ao_mode, spaxel_scale, gratings[0], mc)
@@ -375,6 +377,32 @@ if __name__ == """__main__""":
     # RMS_MC will be of shape [N_files, N_IFU, N_config, N_waves]
     rms_mc = np.array(rms_mc)
     zern_coef = np.array(coef)
+
+    # [0] Field dependent aberrations
+    k_file = 5
+    N_config = 76
+    j_aberr = 5
+    reds = cm.Reds(np.linspace(0.25, 1.0, 4))
+    markers = ['o', '^', 'v', 'D']
+    labels = ['AB', 'CD', 'EF', 'GH']
+    # plt.figure()
+    fig, axes = plt.subplots(2, 2, figsize=(11, 5))
+    for i in range(4):
+        coef_ifu = zern_coef[k_file, i*N_config:(i+1)*N_config]
+        ax = axes.flatten()[i]
+        ax.scatter(np.arange(1, N_config + 1), coef_ifu[:, j_aberr], color=reds[i], marker=markers[i],
+                    label=labels[i], s=15)
+        ax.legend(loc=1)
+
+        ax.set_ylabel(r'Coefficient [nm]')
+        # ax.set_title('IFU-%s' % labels[i])
+        ax.set_xlim([0, N_config])
+    axes[0][0].set_title('%s %s band | MC #%d' % (spaxel_scale, gratings[0], k_file + 1))
+    for ax in axes[1]:
+        ax.set_xlabel(r'Slice number [ ]')
+    # plt.xlabel(r'Slice number [ ]')
+    # plt.ylabel(r'Zernike Coefficient [nm]')
+    plt.show()
 
     # [1] Let's look at the whole population, irrespective of the file / IFU path separation
     # At the moment, to avoid issues with the clipping, we mask out NaN values
@@ -423,10 +451,41 @@ if __name__ == """__main__""":
     plt.figure()
     reds = cm.Reds(np.linspace(0.25, 1, N_files))
     for j in range(N_files):
-        plt.scatter(zern_coef[j][ :, 5], zern_coef[j][ :, 7], s=4, color=reds[j])
+        plt.scatter(zern_coef[j][:, 6], zern_coef[j][:, 7], s=4, color=reds[j])
     # plt.scatter(zern_coef[1, :, 5], zern_coef[1, :, 6], s=5)
     # plt.xlim([-150, 150])
     # plt.ylim([-150, 150])
+    plt.show()
+
+    # Seaborn corner plots
+
+    fig, ax = plt.subplots(1, 1, dpi=100)
+    reds = cm.Reds(np.linspace(0.25, 1, N_files))
+    sns.kdeplot(zern_coef[:, :, 3].flatten(), zern_coef[:, :, 4].flatten(), shade=True, ax=ax)
+    for j in range(N_files):
+        ax.scatter(zern_coef[j][:, 3], zern_coef[j][:, 4], s=4, color=reds[j])
+    plt.show()
+
+    astigX = zern_coef[:, :, 3].flatten()
+    astigY = zern_coef[:, :, 5].flatten()
+    defocus = zern_coef[:, :, 4].flatten()
+    trefoilX = zern_coef[:, :, 6].flatten()
+    comaX = zern_coef[:, :, 7].flatten()
+    comaY = zern_coef[:, :, 8].flatten()
+    trefoilY = zern_coef[:, :, 9].flatten()
+    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2)
+    sns.kdeplot(astigX, defocus, shade=True, ax=ax1)
+    ax1.set_xlabel(r'Oblique Astigmatism [nm]')
+    ax1.set_ylabel(r'Defocus [nm]')
+    sns.kdeplot(astigY, defocus, shade=True, ax=ax2)
+    ax2.set_xlabel(r'Horiz. Astigmatism [nm]')
+    ax2.set_ylabel(r'Defocus [nm]')
+    sns.kdeplot(trefoilX, comaX, shade=True, ax=ax3)
+    ax3.set_xlabel(r'Oblique Trefoil [nm]')
+    ax3.set_ylabel(r'Horizontal Coma [nm]')
+    sns.kdeplot(trefoilY, comaY, shade=True, ax=ax4)
+    ax4.set_xlabel(r'Horiz. Trefoil [nm]')
+    ax4.set_ylabel(r'Vertical Coma [nm]')
     plt.show()
 
     import corner

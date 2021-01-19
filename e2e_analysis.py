@@ -2873,7 +2873,7 @@ class WavefrontsAnalysisMC(AnalysisFast):
         if sampling not in self.samps:
             ValueError('sampling must be one of the following: ' + ', '.join(self.samps.keys()))
 
-        print("Wavefront Map Analysis")
+        # print("Wavefront Map Analysis")
         # open Wavefront Map analysis
         awfe = system.Analyses.New_Analysis(constants.AnalysisIDM_WavefrontMap)
         # iterate through wavelengths
@@ -2907,7 +2907,6 @@ class WavefrontsAnalysisMC(AnalysisFast):
             # get results
             results = awfe.GetResults()
             cresults = CastTo(results, 'IAR_')
-            data = np.array(cresults.GetDataGrid(0).Values)
 
             if j in index_vignetted:
                 # Some Vignetting issue in the E2E file, ignore the wavefront to avoid getting weird results
@@ -2916,10 +2915,19 @@ class WavefrontsAnalysisMC(AnalysisFast):
                 rms_wfe[j] = np.nan
             else:
                 # The Wavefront Map comes in waves, we should rescale it to physical units to use it later
-                wavefront_maps[j] = data * wavelength * 1e3
-                mdata = data - np.nanmean(data)
-                rms = np.sqrt(np.nanmean(mdata * mdata))
-                rms_wfe[j] = rms * wavelength * 1e3
+                try:
+                    data = np.array(cresults.GetDataGrid(0).Values)
+                    wavefront_maps[j] = data * wavelength * 1e3
+                    mdata = data - np.nanmean(data)
+                    rms = np.sqrt(np.nanmean(mdata * mdata))
+                    rms_wfe[j] = rms * wavelength * 1e3
+
+                except AttributeError:
+
+                    wavefront_maps[j] = np.nan
+                    rms_wfe[j] = np.nan
+
+
             # print(ptv_zos, rms_zos)
 
             # plt.figure()
