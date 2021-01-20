@@ -479,39 +479,39 @@ if __name__ == """__main__""":
     # Create a Python Standalone Application
     psa = e2e.PythonStandaloneApplication()
 
-    # # [*] Monte Carlo Instances [*]
-    # ao_mode = 'NOAO'
-    # spaxel_scale = '60x30'
-    # spaxels_per_slice = 3       # How many field points per Slice to use
-    # pupil_sampling = 4          # N x N grid per pupil quadrant. See Zemax Operand help for RWRE
-    # # gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_SHORT', 'K_LONG']
-    # gratings = ['H']
-    # file_options = {'MONTE_CARLO': True, 'AO_MODE': ao_mode, 'SPAX_SCALE': spaxel_scale, 'SLICE_SAMPLING': spaxels_per_slice,
-    #                 'FPRS_MC': '0694', 'IPO_MC': '0055', 'IFU_PATHS_MC': {'AB': '0028', 'CD': '0068', 'EF': '0071', 'GH': '0095'},
-    #                 'IFU_ISP_MC': {'AB': '0024', 'CD': '0009', 'EF': '0013', 'GH': '0073'}}
-    # # To make it realistic, each IFU path must have a different MC instance of the ISP
-    #
-    # files_path = os.path.abspath("D:/End to End Model/Monte_Carlo_Dec/Median")
-    # results_path = os.path.abspath("D:/End to End Model/Monte_Carlo_Dec/Median/Results/Mode_%s/Scale_%s" % (ao_mode, spaxel_scale))
-    # # [*] Monte Carlo Instances [*]
-
-    # [*] Nominal Design [*]
-    # This is the bit we have to change when you run the analysis in your system
-    sys_mode = 'HARMONI'
-    ao_modes = ['SCAO']
-    ao_mode = ao_modes[0]
-    spaxel_scale = '10x10'
+    # [*] Monte Carlo Instances [*]
+    ao_mode = 'NOAO'
+    spaxel_scale = '60x30'
     spaxels_per_slice = 3       # How many field points per Slice to use
     pupil_sampling = 4          # N x N grid per pupil quadrant. See Zemax Operand help for RWRE
-    gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_SHORT', 'K_LONG']
-    # gratings = ['H']
+    # gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_SHORT', 'K_LONG']
+    gratings = ['H']
+    file_options = {'MONTE_CARLO': True, 'AO_MODE': ao_mode, 'SPAX_SCALE': spaxel_scale, 'SLICE_SAMPLING': spaxels_per_slice,
+                    'FPRS_MC': '0694', 'IPO_MC': '0055', 'IFU_PATHS_MC': {'AB': '0028', 'CD': '0068', 'EF': '0071', 'GH': '0095'},
+                    'IFU_ISP_MC': {'AB': '0024', 'CD': '0009', 'EF': '0013', 'GH': '0073'}}
+    # To make it realistic, each IFU path must have a different MC instance of the ISP
 
-    file_options = {'MONTE_CARLO': False, 'which_system': sys_mode, 'AO_modes': ao_modes,
-                    'SPAX_SCALE': spaxel_scale, 'AO_MODE': ao_modes[0]}
+    files_path = os.path.abspath("D:/End to End Model/Monte_Carlo_Dec/Median")
+    results_path = os.path.abspath("D:/End to End Model/Monte_Carlo_Dec/Median/Results/Mode_%s/Scale_%s" % (ao_mode, spaxel_scale))
+    # [*] Monte Carlo Instances [*]
 
-    files_path = os.path.abspath("D:/End to End Model/August_2020")
-    results_path = os.path.abspath("D:/End to End Model/Results_ReportAugust/Mode_%s/Scale_%s" % (ao_modes[0], spaxel_scale))
-    # [*] This is the bit we have to change when you run the analysis in your system [*]
+    # # [*] Nominal Design [*]
+    # # This is the bit we have to change when you run the analysis in your system
+    # sys_mode = 'HARMONI'
+    # ao_modes = ['SCAO']
+    # ao_mode = ao_modes[0]
+    # spaxel_scale = '10x10'
+    # spaxels_per_slice = 3       # How many field points per Slice to use
+    # pupil_sampling = 4          # N x N grid per pupil quadrant. See Zemax Operand help for RWRE
+    # gratings = ['VIS', 'Z_HIGH', 'IZ', 'J', 'IZJ', 'H', 'H_HIGH', 'HK', 'K', 'K_SHORT', 'K_LONG']
+    # # gratings = ['H']
+    #
+    # file_options = {'MONTE_CARLO': False, 'which_system': sys_mode, 'AO_modes': ao_modes,
+    #                 'SPAX_SCALE': spaxel_scale, 'AO_MODE': ao_modes[0]}
+    #
+    # files_path = os.path.abspath("D:/End to End Model/August_2020")
+    # results_path = os.path.abspath("D:/End to End Model/Results_ReportAugust/Mode_%s/Scale_%s" % (ao_modes[0], spaxel_scale))
+    # # [*] This is the bit we have to change when you run the analysis in your system [*]
 
     analysis_dir = os.path.join(results_path, 'RMS_WFE')
     print("Analysis Results will be saved in folder: ", analysis_dir)

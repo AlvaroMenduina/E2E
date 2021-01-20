@@ -23,12 +23,16 @@ We then fit those sample wavefront to Zernike Polynomials
 
 import os
 import numpy as np
+from numpy.fft import fft2, fftshift
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import e2e_analysis as e2e
 import zernike as zern
 import pandas as pd
 import seaborn as sns
+
+import utils
+import calibration
 
 
 def monte_carlo_str(k):
@@ -294,8 +298,8 @@ if __name__ == """__main__""":
     N_coef = zernike_fit.zernike_matrix.shape[-1]       # How many coefficients will the fit consider
 
     # (2) Wavefront Analysis MC
-    N_files = 28
-    for k_mc in np.arange(18, N_files + 1):
+    N_files = 40
+    for k_mc in np.arange(34, N_files + 1):
 
         # Define the dictionary containing all the MC instances for the different subsystems
         mc = monte_carlo_str(k_mc)
@@ -366,7 +370,7 @@ if __name__ == """__main__""":
     RMS_WFE_REQUIREMENTS = {'4x4': 81, '10x10': 123, '20x20': 254, '60x30': 590}
 
     rms_mc, coef = [], []
-    N_files = 10
+    N_files = 50
     for k_mc in np.arange(1, N_files + 1):
         mc = monte_carlo_str(k_mc)
         filesufix = '_%s_SPAX-%s_SPEC-%s_MC%s' % (ao_mode, spaxel_scale, gratings[0], mc)
@@ -379,7 +383,7 @@ if __name__ == """__main__""":
     zern_coef = np.array(coef)
 
     # [0] Field dependent aberrations
-    k_file = 5
+    k_file = 25
     N_config = 76
     j_aberr = 5
     reds = cm.Reds(np.linspace(0.25, 1.0, 4))
@@ -388,7 +392,7 @@ if __name__ == """__main__""":
     # plt.figure()
     fig, axes = plt.subplots(2, 2, figsize=(11, 5))
     for i in range(4):
-        coef_ifu = zern_coef[k_file, i*N_config:(i+1)*N_config]
+        coef_ifu = zern_coef[k_file][i*N_config:(i+1)*N_config]
         ax = axes.flatten()[i]
         ax.scatter(np.arange(1, N_config + 1), coef_ifu[:, j_aberr], color=reds[i], marker=markers[i],
                     label=labels[i], s=15)
@@ -466,26 +470,70 @@ if __name__ == """__main__""":
         ax.scatter(zern_coef[j][:, 3], zern_coef[j][:, 4], s=4, color=reds[j])
     plt.show()
 
-    astigX = zern_coef[:, :, 3].flatten()
-    astigY = zern_coef[:, :, 5].flatten()
-    defocus = zern_coef[:, :, 4].flatten()
-    trefoilX = zern_coef[:, :, 6].flatten()
-    comaX = zern_coef[:, :, 7].flatten()
-    comaY = zern_coef[:, :, 8].flatten()
-    trefoilY = zern_coef[:, :, 9].flatten()
-    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2)
-    sns.kdeplot(astigX, defocus, shade=True, ax=ax1)
+    astigX = np.concatenate([zern_coef[k][:, 3] for k in range(N_files)], axis=0)
+    astigY = np.concatenate([zern_coef[k][:, 5] for k in range(N_files)], axis=0)
+    defocus = np.concatenate([zern_coef[k][:, 4] for k in range(N_files)], axis=0)
+    trefoilX = np.concatenate([zern_coef[k][:, 6] for k in range(N_files)], axis=0)
+    comaX = np.concatenate([zern_coef[k][:, 7] for k in range(N_files)], axis=0)
+    comaY = np.concatenate([zern_coef[k][:, 8] for k in range(N_files)], axis=0)
+    trefoilY = np.concatenate([zern_coef[k][:, 9] for k in range(N_files)], axis=0)
+
+    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(11, 11))
+    levels = 10
+    sns.kdeplot(astigX, defocus, shade=True, ax=ax1, levels=levels)
     ax1.set_xlabel(r'Oblique Astigmatism [nm]')
     ax1.set_ylabel(r'Defocus [nm]')
-    sns.kdeplot(astigY, defocus, shade=True, ax=ax2)
+    Delta = 500
+    ax1.set_xlim([-Delta, Delta])
+    ax1.set_ylim([-400, 400])
+    sns.kdeplot(astigY, defocus, shade=True, ax=ax2, levels=levels)
     ax2.set_xlabel(r'Horiz. Astigmatism [nm]')
     ax2.set_ylabel(r'Defocus [nm]')
-    sns.kdeplot(trefoilX, comaX, shade=True, ax=ax3)
+    ax2.set_xlim([-100, 700])
+    ax2.set_ylim([-400, 400])
+    sns.kdeplot(trefoilX, comaX, shade=True, ax=ax3, levels=levels)
     ax3.set_xlabel(r'Oblique Trefoil [nm]')
     ax3.set_ylabel(r'Horizontal Coma [nm]')
-    sns.kdeplot(trefoilY, comaY, shade=True, ax=ax4)
+    Delta = 200
+    ax3.set_xlim([-Delta, Delta])
+    ax3.set_ylim([-Delta, Delta])
+    sns.kdeplot(trefoilY, comaY, shade=True, ax=ax4, levels=levels)
     ax4.set_xlabel(r'Horiz. Trefoil [nm]')
     ax4.set_ylabel(r'Vertical Coma [nm]')
+    ax4.set_xlim([-Delta, Delta])
+    ax4.set_ylim([-Delta, Delta])
+    for ax in [ax1, ax2, ax3, ax4]:
+        ax.grid(True)
+    #     ax.set_aspect('equal')
+    ax1.set_title(r'60x30 H band | %d MC instances' % N_files)
+    plt.show()
+
+    # Get a higher resolution Zernike matrix to calculate the RMS
+    _fit = ZernikeFit(N_PIX=1024, N_levels=N_levels)
+    _mask = _fit.pupil_mask
+    mat = _fit.zernike_matrix
+    rms_zern = [np.std(mat[:, :, k][_mask]) for k in range(N_coef)]
+
+    fig, ax = plt.subplots(1, 1)
+    mus, stds = [], []
+    for k in np.arange(3, N_coef):
+        _coef = np.concatenate([zern_coef[j][:, k] for j in range(N_files)], axis=0)
+        Nc = _coef.shape[0]
+        # ax.scatter([k + 1] * Nc, _coef, s=5)
+
+        mu = np.mean(_coef) * rms_zern[k]
+        std = np.std(_coef) * rms_zern[k]
+        mus.append(mu)
+        stds.append(std)
+
+        # print("%d | mu = %.1f, std = %.1f" % (k + 1, mu, std))
+    ax.errorbar(x=np.arange(3, N_coef), y=mus, yerr=stds, fmt='o', capsize=2)
+    ax.set_xlabel(r'Zernike Polynomial [ ]')
+    ax.set_ylabel(r'RMS [nm]')
+    ax.set_xticks(np.arange(0, 60, 5))
+    ax.set_xlim([0, N_coef])
+    ax.set_ylim([-200, 200])
+    ax.grid(True)
     plt.show()
 
     import corner
@@ -497,6 +545,276 @@ if __name__ == """__main__""":
     samples = samples[mask_err]
     figure = corner.corner(samples)
     plt.show()
+
+    # ================================================================================================================ #
+    #                               NCPA calibration
+    # ================================================================================================================ #
+
+    # First we have to construct the wavefront maps to generate the samples
+
+    # we have to do a weird flip because not all files have the same number of coefficients
+    # (because of possible vignetting)
+    coefficients = []
+    for k in range(N_files):
+        _coef = zern_coef[k]
+        coefficients.append(_coef.T)
+    coefficients = np.concatenate(coefficients, axis=1).T
+    wavemap0 = np.dot(zernike_fit.zernike_matrix, coefficients[0])
+    # coefficients is now shape [N_samples, N_coef]
+
+    class RealisticTraining(object):
+
+        def __init__(self):
+
+            self.WAVE = 1500
+            self.pix_psf = 2 * sampling
+            self.crop = 32
+            self.minPix, self.maxPix = (self.pix_psf + 1 - self.crop) // 2, (self.pix_psf + 1 + self.crop) // 2
+
+            pad_width = sampling // 2
+            # don't forget to pad the pupil mask
+            self.pupil_pad = np.pad(pupil_mask, pad_width=(pad_width, pad_width), mode='constant', constant_values=False)
+
+            # calculate the normalization PEAK of the PSF
+            pup0 = self.pupil_pad * np.exp(1j * 2 * np.pi * self.pupil_pad)
+            self.PEAK = np.max((np.abs(fftshift(fft2(pup0)))) ** 2)
+
+            return
+
+        def load_zemax_wavefront(self, N_files):
+
+            # We just load the cases in which all IFU paths worked properly
+            wavefront_maps = []
+            coefficients = []
+            for k_mc in np.arange(1, N_files + 1):
+                mc = monte_carlo_str(k_mc)
+                filesufix = '_%s_SPAX-%s_SPEC-%s_MC%s' % (ao_mode, spaxel_scale, gratings[0], mc)
+                _z = np.load(os.path.join(analysis_dir, 'ZERN_COEF_MC' + filesufix + '.npy'))
+                if _z.shape[0] == 4 * 76:
+                    coefficients.append(_z)
+                    _map = np.load(os.path.join(analysis_dir, 'WAVEMAPS' + filesufix + '.npy'))
+                    # get rid of the NaN values
+                    mask_nan = np.isnan(_map)
+                    _map[mask_nan] = 0.0
+                    wavefront_maps.append(_map.reshape(-1, sampling, sampling))
+            wavefront_maps = np.concatenate(wavefront_maps)
+            coefficients = np.concatenate(coefficients)
+            # at this point everything is in physical units [nm]
+
+            print("\nLoaded a dataset of %d Wavefront" % wavefront_maps.shape[0])
+
+            return wavefront_maps, coefficients
+
+        def create_psf_datacubes(self, N_files, diversity):
+
+            wavefront_maps, coefficients = self.load_zemax_wavefront(N_files)
+            N_PSF = wavefront_maps.shape[0]
+
+            # rescale by the wavelength to get radians
+            wavefront_maps /= self.WAVE
+            coefficients /= self.WAVE
+
+            # defocus diversity
+            focus = zernike_fit.zernike_matrix[:, :, 4]
+            focus = np.pad(focus, pad_width=(sampling // 2, sampling // 2), mode='constant', constant_values=0.0)
+            focus = diversity / self.WAVE * focus
+
+            # at 1.5 microns, to get ~4 mas sampling we need a ratio of Radius / Physical size of array of 1/2
+            # so we have to pad everything by 2 with zeros.
+
+            PSF = np.zeros((N_PSF, self.crop, self.crop, 2))
+
+            for k in range(N_PSF):
+                if k % 500 == 0:
+                    print(k)
+
+                # Begin by padding the Zemax wavefront
+                wavefront = wavefront_maps[k]
+                w_pad = np.pad(wavefront, pad_width=(sampling // 2, sampling // 2), mode='constant', constant_values=0.0)
+
+                # Nominal channel
+                pup = self.pupil_pad * np.exp(1j * 2 * np.pi * w_pad)
+                nom_psf = ((np.abs(fftshift(fft2(pup)))) ** 2) / self.PEAK
+                PSF[k, :, :, 0] = nom_psf[self.minPix:self.maxPix, self.minPix:self.maxPix]
+
+                # Defocus channel
+                phase = w_pad + focus
+                pup = self.pupil_pad * np.exp(1j * 2 * np.pi * phase)
+                foc_psf = ((np.abs(fftshift(fft2(pup)))) ** 2) / self.PEAK
+                PSF[k, :, :, 1] = foc_psf[self.minPix:self.maxPix, self.minPix:self.maxPix]
+
+            return PSF, coefficients
+
+    N_files = 50
+    training = RealisticTraining()
+    zemax_wavefronts, _c = training.load_zemax_wavefront(N_files)
+    zemax_wavefronts /= training.WAVE
+    dataset, coeffset = training.create_psf_datacubes(N_files, diversity=500)
+    N_total = dataset.shape[0]
+
+    # Training the Networks
+    N_train = 10000
+    N_test = N_total - N_train
+    train_choice = np.sort(np.random.choice(range(N_total), size=N_train, replace=False))
+    test_choice = []
+    for k in range(N_total):
+        if k not in train_choice:
+            test_choice.append(k)
+
+    train_PSF = dataset[train_choice]
+    train_coef = coeffset[train_choice]
+    test_PSF = dataset[test_choice]
+    test_coef = coeffset[test_choice]
+
+    layer_filters = [64, 32]
+    kernel_size = 3
+    input_shape = (32, 32, 2,)
+    epochs = 10
+    calibration_model = calibration.create_cnn_model(layer_filters, kernel_size, input_shape,
+                                                     N_classes=N_coef, name='CALIBR', activation='relu')
+
+    # Train the calibration model
+    train_history = calibration_model.fit(x=train_PSF, y=train_coef,
+                                          validation_data=(test_PSF, test_coef),
+                                          epochs=epochs, batch_size=32, shuffle=True, verbose=1)
+
+    # Evaluate the performance
+    guess_coef = calibration_model.predict(test_PSF)
+    residual = test_coef - guess_coef
+    from numpy.linalg import norm
+    norm0 = np.mean(norm(guess_coef, axis=1))
+    norm = np.mean(norm(residual, axis=1))
+
+    # Strehl
+    initial_strehl = []
+    final_strehl = []
+    for k in range(N_test):
+        k_test = test_choice[k]
+        strehl0 = np.max(test_PSF[k, :, :, 0])
+        initial_strehl.append(strehl0)
+
+        residual_map = zemax_wavefronts[k_test] - np.dot(zernike_fit.zernike_matrix, guess_coef[k])
+        new_pup = pupil_mask * np.exp(1j * 2*np.pi * residual_map)
+        new_psf = (np.abs(fftshift(fft2(new_pup))))**2 / training.PEAK
+        strehl = np.max(new_psf)
+        final_strehl.append(strehl)
+
+    fig, ax = plt.subplots(1, 1)
+    ax.scatter(initial_strehl, final_strehl, s=5)
+    ax.set_xlim([0, 1])
+    ax.set_ylim([0.75, 1])
+    plt.show()
+
+    # compare the wavefront
+    for k in np.arange(23, N_test, N_test//10):
+        k_test = test_choice[k]
+
+        # calculate the new PSF
+        residual_map = zemax_wavefronts[k_test] - np.dot(zernike_fit.zernike_matrix, guess_coef[k])
+        new_pup = pupil_mask * np.exp(1j * 2*np.pi * residual_map)
+        new_psf = (np.abs(fftshift(fft2(new_pup))))**2 / training.PEAK
+        strehl = np.max(new_psf)
+
+        crop0 = test_PSF[k, :, :, 0][16-8:16+8, 16-8:16+8]
+        crop = new_psf[32-8:32+8, 32-8:32+8]
+
+        cmap = 'inferno'
+        fig, (ax1, ax2, ax3, ax4) = plt.subplots(1, 4)
+        for ax in [ax1, ax2, ax3, ax4]:
+            ax.xaxis.set_visible(False)
+            ax.yaxis.set_visible(False)
+        phase0 = zemax_wavefronts[k_test]
+        RMS0 = np.std(phase0[pupil_mask]) * 1500
+        MEAN = np.mean(phase0[pupil_mask])
+        strehl0 = np.max(test_PSF[k, :, :, 0])
+        # phase0 -= MEAN
+        MAX = max(-np.min(phase0), np.max(phase0))
+        img1 = ax1.imshow(phase0, cmap=cmap, origin='lower')
+        img1.set_clim(-MAX, MAX)
+        cbar1 = plt.colorbar(img1, ax=ax1, fraction=0.046, pad=0.04)
+        # cbar1.set_label('[$\lambda$]', y=0.45)
+        ax1.set_title(r'Zemax Wavefront $\Phi_z$ | $S_0=%.2f$' % (strehl0))
+
+        # axins = ax1.inset_axes([0.025, 0.025, 0.25, 0.25])
+        # img_zoom = axins.imshow(crop0)
+        # img_zoom.set_clim(0, 1)
+        # axins.xaxis.set_visible(False)
+        # axins.yaxis.set_visible(False)
+        # img_zoom.set_clim(-2.75)
+
+        fit = np.dot(zernike_fit.zernike_matrix, test_coef[k])
+        # fit -= MEAN
+        img2 = ax2.imshow(fit, cmap=cmap, origin='lower')
+        img2.set_clim(-MAX, MAX)
+        cbar2 = plt.colorbar(img2, ax=ax2, fraction=0.046, pad=0.04)
+        ax2.set_title(r'Zernike fit $\Phi_0$ [Ground Truth]')
+
+        guess = np.dot(zernike_fit.zernike_matrix, guess_coef[k])
+        # guess -= MEAN
+        img3 = ax3.imshow(guess, cmap=cmap, origin='lower')
+        img3.set_clim(-MAX, MAX)
+        cbar3 = plt.colorbar(img3, ax=ax3, fraction=0.046, pad=0.04)
+        ax3.set_title(r'ML Calibration $\Phi_g$ [Guess]')
+
+        diff = phase0 - guess
+        diff *= pupil_mask
+        RMS = np.std(diff[pupil_mask]) * 1500
+        img4 = ax4.imshow(diff, cmap=cmap, origin='lower')
+        img4.set_clim(-MAX, MAX)
+        cbar4 = plt.colorbar(img4, ax=ax4, fraction=0.046, pad=0.04)
+        ax4.set_title(r'Residual [$\Phi_z - \Phi_g$] | $S=%.2f$' % (strehl))
+
+    # axins = ax4.inset_axes([0.025, 0.025, 0.25, 0.25])
+    # img_zoom = axins.imshow(crop)
+    # img_zoom.set_clim(0, 1)
+    # axins.xaxis.set_visible(False)
+    # axins.yaxis.set_visible(False)
+
+    plt.show()
+
+
+    # Add some Readout Noise to the PSF images to spice things up
+    SNR_READOUT = 750
+    noise_model = noise.NoiseEffects()
+    train_PSF_readout = noise_model.add_readout_noise(train_PSF, RMS_READ=1./SNR_READOUT)
+    test_PSF_readout = noise_model.add_readout_noise(test_PSF, RMS_READ=1./SNR_READOUT)
+
+    # Show some examples from the training set
+    utils.plot_images(train_PSF_readout, N_images=3)
+    plt.show()
+
+
+
+
+    k = 10
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
+    img1 = ax1.imshow(wavefront_maps[k])
+    plt.colorbar(img1, ax=ax1)
+    _map = np.dot(zernike_fit.zernike_matrix, coefficients[k])
+    img2 = ax2.imshow(_map)
+    plt.colorbar(img2, ax=ax2)
+    diff = wavefront_maps[k] - _map
+    diff -= np.nanmean(diff)
+    std = np.nanstd(diff)
+    img3 = ax3.imshow(diff, cmap='RdBu')
+    img3.set_clim(-3 * std, 3*std)
+    plt.colorbar(img3, ax=ax3)
+    plt.show()
+
+    WAVE = 1.5          # microns | reference wavelength
+    SPAX = 4.0          # mas | spaxel scale
+    RHO_APER = utils.rho_spaxel_scale(spaxel_scale=SPAX, wavelength=WAVE)
+    # We have to pad the Zemax wavefronts to get the proper spaxel scale
+
+
+    w = wavefront_maps[0]
+    w_pad = np.pad(w, pad_width=(sampling//2, sampling//2), mode='constant', constant_values=0.0)
+
+
+
+    pup = pupil_pad * np.exp(1j * 2*np.pi * w_pad)
+    fpup = fftshift(fft2(pup))
+    img = (np.abs(fpup))**2 / PEAK
 
 
 

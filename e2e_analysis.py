@@ -1591,6 +1591,8 @@ class RMS_WFE_FastAnalysis(AnalysisFast):
         :param remove_slicer: whether to increase the Aperture of the Image Slicer mirrors to avoid vignetting
         :return:
         """
+        if config % 20 == 0:
+            print(config)
 
         # Set Current Configuration
         system.MCE.SetCurrentConfiguration(config)
