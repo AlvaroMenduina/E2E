@@ -2210,12 +2210,29 @@ class FWHM_PSF_FastAnalysis(AnalysisFast):
             guess_x = PSF_window / 2 / 1000
             fwhm_x, fwhm_y, theta = diffraction.fit_psf_to_gaussian(xx=xx_grid, yy=yy_grid, psf_data=psf_diffr,
                                                                     x0=cent_x, y0=cent_y, sigmax0=guess_x, sigmay0=guess_x)
+            psf_result = psf_diffr
         elif mode == "geometric":
 
             start = time()
             guess_x = PSF_window / 2 / 1000
             fwhm_x, fwhm_y, theta = diffraction.fit_psf_to_gaussian(xx=xx_grid, yy=yy_grid, psf_data=psf_geo,
                                                                     x0=cent_x, y0=cent_y, sigmax0=guess_x, sigmay0=guess_x)
+            psf_result = psf_geo
+
+            # fig, (ax1, ax2) = plt.subplots(1, 2)
+            # img1 = ax1.imshow(psf_geo, extent=[xmin, xmax, ymin, ymax], cmap='plasma', origin='lower')
+            # ax1.scatter(x, y, s=1, color='white', alpha=0.5)
+            # plt.colorbar(img1, ax=ax1, orientation='horizontal')
+            # ax1.set_xlabel(r'X [mm]')
+            # ax1.set_ylabel(r'Y [mm]')
+            # ax1.set_title(r'Geometric PSF estimate | Surface: %s' % surface)
+            #
+            # ax2.plot(x_grid, psf_geo[N_points // 2])
+            # xbins, bins, p = ax2.hist(x, bins=np.linspace(xmin, xmax, N_points), density=True)
+            # for item in p:
+            #     item.set_height(item.get_height() / np.max(xbins))
+            # ax2.set_ylim([0, 1])
+            # plt.show()
 
         time_gauss = time() - start
 
@@ -2223,13 +2240,7 @@ class FWHM_PSF_FastAnalysis(AnalysisFast):
         # print('FWHM time: %.3f sec for DiffPSF convolution:' % time_diffpsf)
         # print('FWHM time: %.3f sec for Gaussian fit:' % time_gauss)
 
-        # fig, (ax1, ax2) = plt.subplots(1, 2)
-        # img1 = ax1.imshow(psf_geo, extent=[xmin, xmax, ymin, ymax], cmap='plasma', origin='lower')
-        # ax1.scatter(x, y, s=1, color='white', alpha=0.5)
-        # plt.colorbar(img1, ax=ax1, orientation='horizontal')
-        # ax1.set_xlabel(r'X [mm]')
-        # ax1.set_ylabel(r'Y [mm]')
-        # ax1.set_title(r'Geometric PSF estimate | Surface: %s' % surface)
+
         #
         # img2 = ax2.imshow(psf_diffr, extent=[xmin, xmax, ymin, ymax], cmap='plasma', origin='lower')
         # plt.colorbar(img2, ax=ax2, orientation='horizontal')
@@ -2240,7 +2251,7 @@ class FWHM_PSF_FastAnalysis(AnalysisFast):
         # elif surface == 'IS':
         #     ax2.set_title(r'Diffr. PSF | %.3f microns | %.1f mas | FWHM_y: %.1f $\mu$m' % (wavelength, spaxel_scale, fwhm_y))
 
-        return fwhm_x, fwhm_y
+        return fwhm_x, fwhm_y, psf_result
 
     def analysis_function_fwhm_psf(self, system, wavelength_idx, surface, config, px, py, spaxel_scale, N_points, mode):
 
@@ -2385,14 +2396,20 @@ class FWHM_PSF_FastAnalysis(AnalysisFast):
 
             xy_data_slicer = slicer_xy[i_wave]
             wavelength = system.SystemData.Wavelengths.GetWavelength(wave_idx).Wavelength
-            fwhm_x_slicer, fwhm_y_slicer = self.calculate_fwhm(surface='IS', xy_data=xy_data_slicer, PSF_window=win_slicer,
+            fwhm_x_slicer, fwhm_y_slicer, psf_slicer = self.calculate_fwhm(surface='IS', xy_data=xy_data_slicer, PSF_window=win_slicer,
                                                                N_points=N_points, spaxel_scale=spaxel_scale,
                                                                wavelength=wavelength, mode=mode)
 
             xy_data_detector = detector_xy[i_wave]
-            fwhm_x_det, fwhm_y_det = self.calculate_fwhm(surface='DET', xy_data=xy_data_detector, PSF_window=win_detect,
+            fwhm_x_det, fwhm_y_det, psf_det = self.calculate_fwhm(surface='DET', xy_data=xy_data_detector, PSF_window=win_detect,
                                                          N_points=N_points, spaxel_scale=spaxel_scale,
                                                          wavelength=wavelength, mode=mode)
+
+            if mode == 'geometric':
+                # save the Geometric PSF at the detector
+                scale_str = '60x30' if spaxel_scale == 60.0 else '4x4'
+                file_suffix = 'geo_psf_%s_%d_nm_config%s' % (scale_str, 1000 * wavelength, config)
+                np.save(file_suffix, psf_det)
 
             # plt.show()
 

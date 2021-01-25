@@ -474,7 +474,8 @@ if __name__ == """__main__""":
     plate_scale = 3.316
 
     # Nominal requirements for RMS WFE
-    RMS_WFE = {'4x4': 81, '10x10': 123, '20x20': 254, '60x30': 590}
+    # RMS_WFE = {'4x4': 81, '10x10': 123, '20x20': 254, '60x30': 590}               # old one
+    RMS_WFE = {'4x4': 81, '10x10': 123, '20x20': 254, '60x30': 553}
 
     # Create a Python Standalone Application
     psa = e2e.PythonStandaloneApplication()
